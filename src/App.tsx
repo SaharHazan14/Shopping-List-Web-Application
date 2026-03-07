@@ -2,7 +2,6 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import WelcomePage from "./pages/WelcomePage";
 import AuthCallback from "./pages/AuthCallback";
 import Dashboard from "./pages/Dashboard";
-import AppLayout from "./components/layout/Applayout";
 import type { JSX } from "react";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -22,10 +21,8 @@ export default function App() {
       {/* Keep the callback route public and top-level so no global redirect interferes */}
       <Route path="/auth/callback" element={<AuthCallback />} />
 
-      {/* Dashboard is rendered inside the AppLayout so the sidebar/topbar appear */}
-      <Route element={<AppLayout />}>
-        <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
-      </Route>
+      {/* Dashboard renders without the global AppLayout (no sidebar/topbar) */}
+      <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
     </Routes>
   );
 }

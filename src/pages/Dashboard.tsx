@@ -1,46 +1,28 @@
-/*
-export default function Dashboard() {
-  // get tokens from localStorage (or wherever you stored them)
-  const accessToken = localStorage.getItem("accessToken");
-  const refreshToken = localStorage.getItem("refreshToken");
-
-  const handleLogout = () => {
-    localStorage.clear();
-    window.location.href = "/"; // go back to welcome page
-  };
-
-  return (
-    <div style={{ padding: "2rem" }}>
-      <h1>Dashboard</h1>
-      <p>Access Token:</p>
-      <pre style={{ whiteSpace: "break-spaces", maxHeight: 200, overflow: "auto" }}>
-        {accessToken}
-      </pre>
-      <p>Refresh Token:</p>
-      <pre style={{ whiteSpace: "break-spaces", maxHeight: 200, overflow: "auto" }}>
-        {refreshToken}
-      </pre>
-      <button onClick={handleLogout} style={{ marginTop: "1rem" }}>
-        Logout
-      </button>
-    </div>
-  );
-}
-*/
-
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
 
 interface User {
   id: number;
-  cognitoSub: string;
+  cognitoSub?: string;
   email: string;
 }
 
 interface ShoppingList {
-  id: number;
+  listId: number;
   title: string;
-  description: string | null;
+  description?: string | null;
+  // backend now returns creatorEmail instead of creatorId
+  creatorEmail?: string | null;
+  totalItems: number;
+  checkedItems: number;
+}
+
+function ProgressBar({ percent }: { percent: number }) {
+  return (
+    <div style={{ height: 10, background: "#e6e6e6", borderRadius: 6, overflow: "hidden" }}>
+      <div style={{ width: `${percent}%`, height: "100%", background: "#4caf50" }} />
+    </div>
+  );
 }
 
 export default function Dashboard() {
@@ -53,10 +35,12 @@ export default function Dashboard() {
     async function fetchData() {
       try {
         const me = await apiFetch<User>("/user/me");
-        const myLists = await apiFetch<ShoppingList[]>("/list");
+        const myLists = await apiFetch<ShoppingList[]>("/list?includeMember=true");
 
         setUser(me);
-        setLists(myLists);
+
+        // Backend returns lists with { listId, title, description, creatorId, totalItems, checkedItems }
+        setLists(myLists || []);
       } catch (err: any) {
         setError(err.message || "Unknown error");
       } finally {
@@ -70,44 +54,37 @@ export default function Dashboard() {
   if (loading) return <p>Loading...</p>;
   if (error) return <p style={{ color: "red" }}>{error}</p>;
 
-  const totalLists = lists.length;
-
   return (
-    <div>
-      <h2>Welcome, {user?.email}</h2>
+    <div style={{ padding: 20 }}>
+      <header style={{ marginBottom: 20 }}>
+        <h1 style={{ margin: 0 }}>Welcome{user ? `, ${user.email}` : ""}!</h1>
+        <p style={{ color: "#666", marginTop: 6 }}>Here are your shopping lists.</p>
+      </header>
 
-      <div style={{ display: "flex", gap: "20px", marginTop: "20px" }}>
-        <div style={{ padding: "10px", background: "white", flex: 1, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-          <h4>Total Lists</h4>
-          <p>{totalLists}</p>
-        </div>
-        <div style={{ padding: "10px", background: "white", flex: 1, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-          <h4>Total Items</h4>
-          <p>0</p>
-        </div>
-        <div style={{ padding: "10px", background: "white", flex: 1, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-          <h4>Completed %</h4>
-          <p>0%</p>
-        </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+        {lists.map((list) => {
+          const total = list.totalItems ?? 0;
+          const checked = list.checkedItems ?? 0;
+          const percent = total > 0 ? Math.round((checked / total) * 100) : 0;
+          const ownerEmail = list.creatorEmail
+            ? (user && list.creatorEmail === user.email ? "You" : list.creatorEmail)
+            : "-";
+
+          return (
+            <div key={list.listId} style={{ background: "white", padding: 16, borderRadius: 8, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
+              <h3 style={{ margin: "0 0 8px 0" }}>{list.title}</h3>
+              <p style={{ margin: "0 0 12px 0", color: "#444" }}>{list.description ?? "No description"}</p>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <small style={{ color: "#666" }}>Owner: {ownerEmail}</small>
+                <small style={{ color: "#666" }}>{checked}/{total} checked</small>
+              </div>
+
+              <ProgressBar percent={percent} />
+            </div>
+          );
+        })}
       </div>
-
-      <h3 style={{ marginTop: "40px" }}>Your Lists</h3>
-      <table style={{ width: "100%", marginTop: "10px", background: "white", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-        <thead>
-          <tr>
-            <th style={{ padding: "10px", borderBottom: "1px solid #ddd" }}>Title</th>
-            <th style={{ padding: "10px", borderBottom: "1px solid #ddd" }}>Description</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lists.map((list) => (
-            <tr key={list.id}>
-              <td style={{ padding: "10px", borderBottom: "1px solid #eee" }}>{list.title}</td>
-              <td style={{ padding: "10px", borderBottom: "1px solid #eee" }}>{list.description ?? "-"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
