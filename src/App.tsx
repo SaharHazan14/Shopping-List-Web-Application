@@ -20,10 +20,9 @@ export default function App() {
       <Route path="/" element={<WelcomePage />} />
       {/* Keep the callback route public and top-level so no global redirect interferes */}
       <Route path="/auth/callback" element={<AuthCallback />} />
-      <Route
-        path="/dashboard"
-        element={<RequireAuth><Dashboard /></RequireAuth>}
-      />
+
+      {/* Dashboard renders without the global AppLayout (no sidebar/topbar) */}
+      <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
     </Routes>
   );
 }
