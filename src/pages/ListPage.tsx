@@ -121,6 +121,26 @@ export default function ListPage() {
     }
   }
 
+  async function deleteItem(itemId: number) {
+    if (!listId) return;
+    const confirmed = window.confirm("Remove this item from the list?");
+    if (!confirmed) return;
+    setRowLoading((s) => ({ ...s, [itemId]: true }));
+    try {
+      await apiFetch(`/list/${listId}/item/${itemId}`, {
+        method: "DELETE",
+      });
+
+      // remove locally
+      setItems((prev) => prev.filter((it) => it.itemId !== itemId));
+    } catch (err: any) {
+      console.error("[ListPage] failed to delete item:", err);
+      alert("Failed to delete item: " + (err.message || "unknown"));
+    } finally {
+      setRowLoading((s) => ({ ...s, [itemId]: false }));
+    }
+  }
+
   const title = (location.state as any)?.title ?? `List ${listId}`;
 
   if (loading) return <p>Loading items...</p>;
@@ -148,6 +168,7 @@ export default function ListPage() {
             <th style={{ padding: 8 }}>Name</th>
             <th style={{ padding: 8 }}>Quantity</th>
             <th style={{ padding: 8 }}>Checked</th>
+            <th style={{ padding: 8 }}>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -188,6 +209,9 @@ export default function ListPage() {
                   }}
                 />
                 {rowLoading[it.itemId] && <span style={{ marginLeft: 8 }}>Saving...</span>}
+              </td>
+              <td style={{ padding: 8 }}>
+                <button onClick={() => deleteItem(it.itemId)} disabled={!!rowLoading[it.itemId]}>Delete</button>
               </td>
             </tr>
           ))}

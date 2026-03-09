@@ -22,5 +22,22 @@ export async function apiFetch<T>(
     throw new Error(`Request failed: ${response.status}`);
   }
 
-  return response.json() as Promise<T>;
+  // Handle empty responses (204 No Content or empty body) gracefully.
+  // Some endpoints (DELETE) may return no JSON body which would cause
+  // response.json() to throw 'Unexpected end of JSON input'.
+  if (response.status === 204) {
+    return {} as T;
+  }
+
+  const text = await response.text();
+  if (!text) {
+    return {} as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch (err) {
+    // If parsing fails, throw a descriptive error including the raw text for debugging
+    throw new Error(`Failed to parse JSON response: ${String(err)} — raw response: ${text}`);
+  }
 }
