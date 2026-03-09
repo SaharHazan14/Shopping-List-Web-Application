@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 
 interface User {
@@ -26,6 +27,7 @@ function ProgressBar({ percent }: { percent: number }) {
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [lists, setLists] = useState<ShoppingList[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,7 +73,21 @@ export default function Dashboard() {
             : "-";
 
           return (
-            <div key={list.listId} style={{ background: "white", padding: 16, borderRadius: 8, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
+            <div
+              role="button"
+              onClick={() => navigate(`/list/${list.listId}`, { state: { title: list.title } })}
+              key={list.listId}
+              style={{
+                background: "white",
+                padding: 16,
+                borderRadius: 8,
+                boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+                cursor: "pointer",
+                transition: "transform 120ms ease",
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.transform = "translateY(-4px)")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.transform = "translateY(0px)")}
+            >
               <h3 style={{ margin: "0 0 8px 0" }}>{list.title}</h3>
               <p style={{ margin: "0 0 12px 0", color: "#444" }}>{list.description ?? "No description"}</p>
 

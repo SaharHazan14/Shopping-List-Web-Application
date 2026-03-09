@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import WelcomePage from "./pages/WelcomePage";
 import AuthCallback from "./pages/AuthCallback";
 import Dashboard from "./pages/Dashboard";
+import ListPage from "./pages/ListPage";
 import type { JSX } from "react";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -23,6 +24,7 @@ export default function App() {
 
       {/* Dashboard renders without the global AppLayout (no sidebar/topbar) */}
       <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
+      <Route path="/list/:listId" element={<RequireAuth><ListPage /></RequireAuth>} />
     </Routes>
   );
 }
