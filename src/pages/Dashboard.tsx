@@ -37,16 +37,19 @@ export default function Dashboard() {
   const [newDescription, setNewDescription] = useState("");
   const [creating, setCreating] = useState(false);
 
-  async function fetchLists() {
+  async function fetchLists(signal?: AbortSignal) {
     setLoading(true);
     try {
-      const me = await apiFetch<User>("/user/me");
-      const myLists = await apiFetch<ShoppingList[]>("/list?includeMember=true");
+      const me = await apiFetch<User>("/user/me", { signal });
+      const myLists = await apiFetch<ShoppingList[]>("/list?includeMember=true", { signal });
       console.log("[Dashboard] fetched lists:", myLists);
       setUser(me);
       setLists(myLists || []);
       setError(null);
     } catch (err: any) {
+      if (err && (err.name === 'AbortError' || err.message?.includes('The user aborted a request'))) {
+        return;
+      }
       setError(err.message || "Unknown error");
     } finally {
       setLoading(false);
@@ -54,7 +57,9 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    fetchLists();
+    const controller = new AbortController();
+    fetchLists(controller.signal);
+    return () => controller.abort();
   }, []);
 
   async function createList() {

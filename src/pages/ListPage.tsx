@@ -56,9 +56,17 @@ export default function ListPage() {
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [showAddItemModal, setShowAddItemModal] = useState(false);
+  const [availableItems, setAvailableItems] = useState<any[]>([]);
+  const [loadingAvailableItems, setLoadingAvailableItems] = useState(false);
+  const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [newQuantity, setNewQuantity] = useState<number>(1);
+  const [newChecked, setNewChecked] = useState<boolean>(false);
+  const [addingItem, setAddingItem] = useState(false);
 
   useEffect(() => {
     let mounted = true;
+    const controller = new AbortController();
     async function fetchAll() {
       if (!listId) {
         setError("Missing list id");
@@ -68,10 +76,10 @@ export default function ListPage() {
 
       try {
         const [respItems, respDetails, me, respMembers] = await Promise.all([
-          apiFetch<ListItemResponseDTO[]>(`/list/${listId}/item`),
-          apiFetch<ListDetails>(`/list/${listId}`),
-          apiFetch<{ id?: number; email?: string }>("/user/me").catch(() => null),
-          apiFetch<ListMember[]>(`/list/${listId}/member`).catch(() => []),
+          apiFetch<ListItemResponseDTO[]>(`/list/${listId}/item`, { signal: controller.signal }),
+          apiFetch<ListDetails>(`/list/${listId}`, { signal: controller.signal }),
+          apiFetch<{ id?: number; email?: string }>("/user/me", { signal: controller.signal }).catch(() => null),
+          apiFetch<ListMember[]>(`/list/${listId}/member`, { signal: controller.signal }).catch(() => []),
         ]);
 
         if (!mounted) return;
@@ -97,6 +105,10 @@ export default function ListPage() {
         setEditDescription(respDetails?.description ?? "");
         setMembers(respMembers || []);
       } catch (err: any) {
+        // Ignore aborts triggered by StrictMode remounts / cleanup
+        if (err && (err.name === 'AbortError' || err.message?.includes('The user aborted a request'))) {
+          return;
+        }
         console.error("[ListPage] failed to load:", err);
         if (!mounted) return;
         setError(err.message || "Failed to load list");
@@ -108,6 +120,7 @@ export default function ListPage() {
     fetchAll();
     return () => {
       mounted = false;
+      controller.abort();
     };
   }, [listId]);
 
@@ -350,6 +363,24 @@ export default function ListPage() {
               <button title="Delete list" onClick={() => deleteList()} style={{ background: 'transparent', border: '1px solid rgba(239,68,68,0.12)', padding: 8, borderRadius: 8, cursor: 'pointer', color: '#ef4444' }}>🗑️</button>
             </div>
           )}
+          <div>
+            <button onClick={() => {
+              setShowAddItemModal(true);
+              // fetch available items when opening
+              (async () => {
+                setLoadingAvailableItems(true);
+                try {
+                  const resp = await apiFetch<any[]>('/item?global=true');
+                  setAvailableItems(resp || []);
+                } catch (err: any) {
+                  console.error('[ListPage] failed to load available items', err);
+                  setAvailableItems([]);
+                } finally {
+                  setLoadingAvailableItems(false);
+                }
+              })();
+            }} style={{ background: '#10b981', color: 'white', border: 'none', padding: '8px 12px', borderRadius: 8, cursor: 'pointer' }}>+ Add Item</button>
+          </div>
         </div>
       </div>
 
@@ -373,6 +404,77 @@ export default function ListPage() {
           ))}
         </ul>
       </div>
+
+      {/* Add Item modal */}
+      {showAddItemModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={() => setShowAddItemModal(false)}>
+          <div role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} style={{ background: 'white', width: '92%', maxWidth: 720, borderRadius: 8, padding: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ margin: 0 }}>Add Item to List</h3>
+              <button onClick={() => setShowAddItemModal(false)}>Close</button>
+            </div>
+
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, color: '#64748b', marginBottom: 6 }}>Choose an item</div>
+                  {loadingAvailableItems ? <div>Loading items...</div> : (
+                    <div style={{ maxHeight: 300, overflow: 'auto', display: 'grid', gap: 8 }}>
+                      {availableItems.map(it => (
+                        <div key={it.id} onClick={() => setSelectedItemId(it.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 8, borderRadius: 8, cursor: 'pointer', background: selectedItemId === it.id ? '#f1f5f9' : 'white', border: '1px solid #eef2ff' }}>
+                          <div style={{ width: 44, height: 44, borderRadius: 8, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{it.imageUrl ? <img src={it.imageUrl} alt={it.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }} /> : <div style={{ fontSize: 18, color: '#94a3b8' }}>🍎</div>}</div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 15, color: '#0f172a' }}>{it.name}</div>
+                            <div style={{ fontSize: 12, color: '#64748b' }}>{it.category} {it.creatorId ? <span style={{ color: '#92400e' }}>(Custom)</span> : <span style={{ color: '#0f172a' }}>(Global)</span>}</div>
+                          </div>
+                          <div style={{ width: 80, textAlign: 'right' }}>{selectedItemId === it.id ? 'Selected' : ''}</div>
+                        </div>
+                      ))}
+                      {availableItems.length === 0 && <div style={{ color: '#64748b' }}>No items available.</div>}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ width: 260 }}>
+                  <div style={{ fontSize: 13, color: '#64748b', marginBottom: 6 }}>Quantity</div>
+                  <input type="number" min={1} value={newQuantity} onChange={(e) => setNewQuantity(Math.max(1, Number(e.target.value) || 1))} style={{ width: '100%', padding: 8 }} />
+
+                  <div style={{ marginTop: 12 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input type="checkbox" checked={newChecked} onChange={(e) => setNewChecked(e.target.checked)} />
+                      <span style={{ color: '#64748b' }}>Mark as checked</span>
+                    </label>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+                    <button onClick={() => setShowAddItemModal(false)} disabled={addingItem}>Cancel</button>
+                    <button onClick={async () => {
+                      if (!listId) return;
+                      if (!selectedItemId) { alert('Please select an item'); return; }
+                      setAddingItem(true);
+                      try {
+                        await apiFetch(`/list/${listId}/item`, { method: 'POST', body: JSON.stringify({ itemId: selectedItemId, quantity: newQuantity, isChecked: newChecked }) });
+                        // refresh items in list
+                        const refreshed = await apiFetch<ListItemResponseDTO[]>(`/list/${listId}/item`);
+                        setItems(refreshed || []);
+                        setShowAddItemModal(false);
+                        setSelectedItemId(null);
+                        setNewQuantity(1);
+                        setNewChecked(false);
+                      } catch (err: any) {
+                        console.error('[ListPage] failed to add item to list:', err);
+                        alert('Failed to add item: ' + (err.message || 'unknown'));
+                      } finally {
+                        setAddingItem(false);
+                      }
+                    }} disabled={addingItem || loadingAvailableItems} style={{ background: '#10b981', color: 'white', border: 'none', padding: '8px 12px', borderRadius: 8 }}>{addingItem ? 'Adding...' : 'Add to list'}</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit modal */}
       {editing && (

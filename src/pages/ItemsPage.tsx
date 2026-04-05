@@ -28,18 +28,22 @@ export default function ItemsPage() {
 
   useEffect(() => {
     let mounted = true;
+    const controller = new AbortController();
     async function fetchItems() {
       setLoading(true);
       try {
         const [resp, meResp] = await Promise.all([
-          apiFetch<ItemDTO[]>('/item?global=true'),
-          apiFetch<{ id?: number; email?: string }>('/user/me').catch(() => null),
+          apiFetch<ItemDTO[]>('/item?global=true', { signal: controller.signal }),
+          apiFetch<{ id?: number; email?: string }>('/user/me', { signal: controller.signal }).catch(() => null),
         ]);
         if (!mounted) return;
         setItems((resp as ItemDTO[] )|| []);
         setMe(meResp || null);
         setError(null);
       } catch (err: any) {
+        if (err && (err.name === 'AbortError' || err.message?.includes('The user aborted a request'))) {
+          return;
+        }
         console.error("[ItemsPage] failed to load items:", err);
         if (!mounted) return;
         setError(err.message || "Failed to load items");
@@ -49,7 +53,7 @@ export default function ItemsPage() {
     }
 
     fetchItems();
-    return () => { mounted = false; };
+    return () => { mounted = false; controller.abort(); };
   }, []);
 
   if (loading) return <p>Loading items...</p>;
