@@ -1,5 +1,5 @@
 import { api } from "./client";
-import type { UserList } from "../types/list";
+import type { ListDetails, UserList } from "../types/list";
 
 export interface CreateListPayload {
   title: string;
@@ -26,4 +26,9 @@ export async function updateListDetails(listId: number, payload: UpdateListPaylo
 
 export async function deleteList(listId: number): Promise<void> {
   await api.delete(`/list/${listId}`);
+}
+
+export async function getListById(listId: number): Promise<ListDetails> {
+  const response = await api.get<ListDetails>(`/list/${listId}`);
+  return response.data;
 }

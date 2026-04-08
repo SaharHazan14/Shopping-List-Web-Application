@@ -6,3 +6,10 @@ export interface UserList {
   totalItems: number;
   checkedItems: number;
 }
+
+export interface ListDetails {
+  id: number;
+  title: string;
+  description: string | null;
+  creatorId: number;
+}

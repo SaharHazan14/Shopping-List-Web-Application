@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import CreateListCard from "../components/CreateListCard";
 import UpdateListCard from "../components/UpdateListCard";
 import { deleteList, getCurrentUserLists } from "../api/list";
@@ -7,6 +8,7 @@ import type { UserList } from "../types/list";
 import type { CurrentUser } from "../types/user";
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [userLoading, setUserLoading] = useState(true);
   const [lists, setLists] = useState<UserList[]>([]);
@@ -133,6 +135,9 @@ export default function Dashboard() {
                 Items: {list.checkedItems}/{list.totalItems}
               </div>
               <div style={{ marginTop: "8px" }}>
+                <button type="button" onClick={() => navigate(`/lists/${list.listId}`)}>
+                  Open
+                </button>
                 <button type="button" onClick={() => setEditingList(list)}>
                   Edit Details
                 </button>
