@@ -81,6 +81,9 @@ export default function Dashboard() {
         <button type="button" onClick={() => setIsCreateOpen(true)}>
           Create List
         </button>
+        <button type="button" style={{ marginLeft: "8px" }} onClick={() => navigate("/items")}>
+          View Items
+        </button>
       </div>
 
       {isCreateOpen ? (

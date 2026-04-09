@@ -4,6 +4,7 @@ import AuthCallback from "./pages/AuthCallback";
 import PrivateRoute from "./components/PrivateRoute";
 import Dashboard from "./pages/Dashboard";
 import ListPage from "./pages/ListPage.tsx";
+import ItemsPage from "./pages/ItemsPage";
 
 export default function App() {
   return (
@@ -24,6 +25,14 @@ export default function App() {
           element={
             <PrivateRoute>
               <ListPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/items"
+          element={
+            <PrivateRoute>
+              <ItemsPage />
             </PrivateRoute>
           }
         />

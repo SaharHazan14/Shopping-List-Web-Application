@@ -13,3 +13,13 @@ export interface ListDetails {
   description: string | null;
   creatorId: number;
 }
+
+export interface CreateListPayload {
+  title: string;
+  description?: string;
+}
+
+export interface UpdateListPayload {
+  title?: string;
+  description?: string;
+}

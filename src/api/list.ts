@@ -1,15 +1,5 @@
 import { api } from "./client";
-import type { ListDetails, UserList } from "../types/list";
-
-export interface CreateListPayload {
-  title: string;
-  description?: string;
-}
-
-export interface UpdateListPayload {
-  title?: string;
-  description?: string;
-}
+import type { CreateListPayload, ListDetails, UpdateListPayload, UserList } from "../types/list";
 
 export async function getCurrentUserLists(): Promise<UserList[]> {
   const response = await api.get<UserList[]>("/list?includeMember=true");
