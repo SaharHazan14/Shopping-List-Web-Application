@@ -42,3 +42,23 @@ export interface UpdateListItemPayload {
   quantity?: number;
   isChecked?: boolean;
 }
+
+export type ListMemberRole = "OWNER" | "EDITOR" | "VIEWER";
+
+export interface ListMember {
+  listId: number;
+  memberId: number;
+  role: ListMemberRole;
+  email: string;
+}
+
+export type EditableListMemberRole = "EDITOR" | "VIEWER";
+
+export interface UpdateListMemberPayload {
+  role: EditableListMemberRole;
+}
+
+export interface AddListMemberPayload {
+  memberId: number;
+  role: EditableListMemberRole;
+}
