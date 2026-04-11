@@ -41,5 +41,9 @@ export default function AuthCallback() {
     exchangeCode();
   }, [navigate]);
 
-  return <div>{message}</div>;
+  return (
+    <div className="flex min-h-screen items-center justify-center px-4 text-center">
+      <p className="text-base font-medium text-slate-700">{message}</p>
+    </div>
+  );
 }

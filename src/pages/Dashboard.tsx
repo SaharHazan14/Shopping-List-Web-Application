@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
+import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { createList, deleteList, getCurrentUserLists, updateListDetails } from "../api/list";
 import { getCurrentUser } from "../api/user";
 import type { UserList } from "../types/list";
 import type { CurrentUser } from "../types/user";
-import AddItemForm from "../components/dashboard/AddItemForm";
 import ItemList from "../components/dashboard/ItemList";
 import { Button } from "../components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent } from "../components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -26,6 +26,8 @@ export default function Dashboard() {
   const [listsLoading, setListsLoading] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingList, setEditingList] = useState<UserList | null>(null);
+  const [createTitle, setCreateTitle] = useState("");
+  const [createDescription, setCreateDescription] = useState("");
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [createLoading, setCreateLoading] = useState(false);
@@ -72,6 +74,22 @@ export default function Dashboard() {
     return namePart || currentUser.email;
   }, [currentUser]);
 
+  const ownedLists = useMemo(() => {
+    if (!currentUser?.email) return [];
+
+    return lists.filter(
+      (list) => list.creatorEmail.toLowerCase() === currentUser.email.toLowerCase(),
+    );
+  }, [currentUser?.email, lists]);
+
+  const sharedLists = useMemo(() => {
+    if (!currentUser?.email) return lists;
+
+    return lists.filter(
+      (list) => list.creatorEmail.toLowerCase() !== currentUser.email.toLowerCase(),
+    );
+  }, [currentUser?.email, lists]);
+
   const handleDeleteList = async (listId: number, title: string) => {
     const confirmed = window.confirm(`Delete list \"${title}\"? This action cannot be undone.`);
     if (!confirmed) return;
@@ -89,16 +107,29 @@ export default function Dashboard() {
     }
   };
 
-  const handleCreateList = async (name: string) => {
+  const handleCreateList = async () => {
+    const trimmedTitle = createTitle.trim();
+    const trimmedDescription = createDescription.trim();
+
+    if (trimmedTitle.length < 2) {
+      setCreateError("Title must be at least 2 characters.");
+      return;
+    }
+
     try {
       setCreateLoading(true);
       setCreateError(null);
-      await createList({ title: name });
+      await createList({
+        title: trimmedTitle,
+        ...(trimmedDescription ? { description: trimmedDescription } : {}),
+      });
+      setCreateTitle("");
+      setCreateDescription("");
+      setIsCreateOpen(false);
       await fetchLists();
     } catch (error) {
       console.error("Failed to create list:", error);
-      setCreateError("Failed to add item.");
-      throw error;
+      setCreateError("Failed to create list.");
     } finally {
       setCreateLoading(false);
     }
@@ -111,12 +142,29 @@ export default function Dashboard() {
     setUpdateError(null);
   };
 
+  const handleCreateDialogChange = (open: boolean) => {
+    setIsCreateOpen(open);
+    if (!open) {
+      setCreateTitle("");
+      setCreateDescription("");
+      setCreateError(null);
+    }
+  };
+
+  const canCreateList = createTitle.trim().length >= 2;
+  const canUpdateList = editTitle.trim().length >= 2;
+
   const handleUpdateList = async () => {
     if (!editingList) return;
 
     const payload: { title?: string; description?: string } = {};
     const trimmedTitle = editTitle.trim();
     const trimmedDescription = editDescription.trim();
+
+    if (trimmedTitle.length < 2) {
+      setUpdateError("Title must be at least 2 characters.");
+      return;
+    }
 
     if (trimmedTitle) payload.title = trimmedTitle;
     if (trimmedDescription) payload.description = trimmedDescription;
@@ -134,7 +182,27 @@ export default function Dashboard() {
       await fetchLists();
     } catch (error) {
       console.error("Failed to update list:", error);
-      setUpdateError("Failed to update list.");
+
+      if (axios.isAxiosError(error)) {
+        const responseData = error.response?.data;
+
+        if (typeof responseData === "string") {
+          setUpdateError(responseData);
+        } else if (
+          responseData &&
+          typeof responseData === "object" &&
+          "message" in responseData &&
+          typeof responseData.message === "string"
+        ) {
+          setUpdateError(responseData.message);
+        } else {
+          setUpdateError(error.message || "Failed to update list.");
+        }
+      } else if (error instanceof Error) {
+        setUpdateError(error.message);
+      } else {
+        setUpdateError("Failed to update list.");
+      }
     } finally {
       setUpdateLoading(false);
     }
@@ -145,31 +213,26 @@ export default function Dashboard() {
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
         <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Shopping List</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">SyncCart</h1>
+            <p className="mt-2 text-sm font-medium text-slate-700">
+              Plan together. Shop smarter.
+            </p>
             <p className="mt-1 text-sm text-slate-500">
               {userLoading ? "Loading user..." : `Welcome back, ${username}`}
             </p>
           </div>
-          <Button variant="outline" onClick={() => navigate("/items")}>View Items Catalog</Button>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Button variant="outline" onClick={() => navigate("/items")}>View Items Catalog</Button>
+            <Button
+              onClick={() => setIsCreateOpen(true)}
+              className="bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
+            >
+              Create New List
+            </Button>
+          </div>
         </header>
 
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>Add New Item</CardTitle>
-            <CardDescription>Create a new shopping list entry quickly.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <AddItemForm onAdd={handleCreateList} loading={createLoading} />
-            {createError ? <p className="mt-3 text-sm text-red-600">{createError}</p> : null}
-          </CardContent>
-        </Card>
-
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-slate-900">Your Lists</h2>
-            <Button variant="secondary" onClick={() => setIsCreateOpen(true)}>Advanced Create</Button>
-          </div>
-
+        <section className="space-y-8">
           {deleteError ? <p className="text-sm text-red-600">{deleteError}</p> : null}
 
           {listsLoading ? (
@@ -177,18 +240,46 @@ export default function Dashboard() {
               <CardContent className="py-8 text-center text-sm text-slate-500">Loading lists...</CardContent>
             </Card>
           ) : (
-            <ItemList
-              lists={lists}
-              deletingListId={deletingListId}
-              onOpen={(listId) => navigate(`/lists/${listId}`)}
-              onEdit={openEditDialog}
-              onDelete={(list) => handleDeleteList(list.listId, list.title)}
-            />
+            <>
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-xl font-semibold text-slate-900">My Lists</h2>
+                  <p className="mt-1 text-sm text-slate-500">Lists you own and can fully manage.</p>
+                </div>
+                <ItemList
+                  lists={ownedLists}
+                  deletingListId={deletingListId}
+                  emptyTitle="No lists created yet"
+                  emptyDescription="Create your first list to start organizing your shopping items."
+                  showOwnerActions
+                  onOpen={(listId) => navigate(`/lists/${listId}`)}
+                  onEdit={openEditDialog}
+                  onDelete={(list) => handleDeleteList(list.listId, list.title)}
+                />
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-xl font-semibold text-slate-900">Shared With Me</h2>
+                  <p className="mt-1 text-sm text-slate-500">Lists other collaborators shared with your account.</p>
+                </div>
+                <ItemList
+                  lists={sharedLists}
+                  deletingListId={deletingListId}
+                  emptyTitle="No shared lists yet"
+                  emptyDescription="When someone shares a list with you, it will appear here."
+                  showOwnerActions={false}
+                  onOpen={(listId) => navigate(`/lists/${listId}`)}
+                  onEdit={openEditDialog}
+                  onDelete={(list) => handleDeleteList(list.listId, list.title)}
+                />
+              </div>
+            </>
           )}
         </section>
       </div>
 
-      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+      <Dialog open={isCreateOpen} onOpenChange={handleCreateDialogChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Create List</DialogTitle>
@@ -196,22 +287,32 @@ export default function Dashboard() {
           </DialogHeader>
           <form
             className="space-y-4"
-            onSubmit={async (event) => {
+            onSubmit={(event) => {
               event.preventDefault();
-              await handleCreateList(editTitle.trim() || "Untitled List");
-              setIsCreateOpen(false);
+              void handleCreateList();
             }}
           >
             <Input
               placeholder="List title"
-              value={editTitle}
-              onChange={(event) => setEditTitle(event.target.value)}
+              value={createTitle}
+              onChange={(event) => setCreateTitle(event.target.value)}
+              disabled={createLoading}
             />
+            <Input
+              placeholder="Description (optional)"
+              value={createDescription}
+              onChange={(event) => setCreateDescription(event.target.value)}
+              disabled={createLoading}
+            />
+            {createError ? <p className="text-sm text-red-600">{createError}</p> : null}
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
-                Cancel
+              <Button
+                type="submit"
+                disabled={createLoading || !canCreateList}
+                className="min-w-32 bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
+              >
+                {createLoading ? "Creating..." : "Create List"}
               </Button>
-              <Button type="submit" disabled={createLoading}>{createLoading ? "Creating..." : "Create"}</Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -241,11 +342,12 @@ export default function Dashboard() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingList(null)} disabled={updateLoading}>
-              Cancel
-            </Button>
-            <Button onClick={handleUpdateList} disabled={updateLoading}>
-              {updateLoading ? "Saving..." : "Save Changes"}
+            <Button
+              onClick={handleUpdateList}
+              disabled={updateLoading || !canUpdateList}
+              className="min-w-32 bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
+            >
+              {updateLoading ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>
