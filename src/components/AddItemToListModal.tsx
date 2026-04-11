@@ -1,9 +1,19 @@
-import { type ComponentProps, useEffect, useState } from "react";
+import { type ComponentProps, useEffect, useMemo, useState } from "react";
 import { getAllItems } from "../api/item";
 import { addItemToList } from "../api/list";
 import type { Item } from "../types/item";
 import type { AddListItemPayload } from "../types/list";
 import axios from "axios";
+import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { Input } from "./ui/input";
 
 interface AddItemToListModalProps {
   listId: number;
@@ -14,8 +24,8 @@ interface AddItemToListModalProps {
 export default function AddItemToListModal({ listId, onItemAdded, onCancel }: AddItemToListModalProps) {
   const [catalogItems, setCatalogItems] = useState<Item[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [itemQuery, setItemQuery] = useState("");
   const [quantity, setQuantity] = useState(1);
-  const [isChecked, setIsChecked] = useState(false);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -28,9 +38,8 @@ export default function AddItemToListModal({ listId, onItemAdded, onCancel }: Ad
         setCatalogError(null);
         const items = await getAllItems();
         setCatalogItems(items);
-        if (items.length > 0) {
-          setSelectedItemId(items[0].id);
-        }
+        setSelectedItemId(null);
+        setItemQuery("");
       } catch (err) {
         console.error("Failed to fetch catalog items:", err);
         setCatalogError("Failed to load catalog items.");
@@ -41,6 +50,27 @@ export default function AddItemToListModal({ listId, onItemAdded, onCancel }: Ad
 
     fetchCatalog();
   }, []);
+
+  const filteredCatalogItems = useMemo(() => {
+    const query = itemQuery.trim().toLowerCase();
+    if (!query) return catalogItems;
+
+    return catalogItems.filter((item) => {
+      const searchableText = `${item.name} ${item.category}`.toLowerCase();
+      return searchableText.includes(query);
+    });
+  }, [catalogItems, itemQuery]);
+
+  const handleItemQueryChange = (value: string) => {
+    setItemQuery(value);
+
+    const normalizedValue = value.trim().toLowerCase();
+    const exactMatch = catalogItems.find(
+      (item) => `${item.name} (${item.category})`.toLowerCase() === normalizedValue,
+    );
+
+    setSelectedItemId(exactMatch ? exactMatch.id : null);
+  };
 
   const handleAddItem: NonNullable<ComponentProps<"form">["onSubmit"]> = async (e) => {
     e.preventDefault();
@@ -61,7 +91,7 @@ export default function AddItemToListModal({ listId, onItemAdded, onCancel }: Ad
       const payload: AddListItemPayload = {
         itemId: selectedItemId,
         quantity,
-        isChecked,
+        isChecked: false,
       };
       await addItemToList(listId, payload);
       onItemAdded();
@@ -78,141 +108,72 @@ export default function AddItemToListModal({ listId, onItemAdded, onCancel }: Ad
   };
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "rgba(0, 0, 0, 0.5)",
-        zIndex: 1000,
-      }}
-      onClick={onCancel}
-    >
-      <div
-        style={{
-          backgroundColor: "white",
-          borderRadius: "8px",
-          padding: "24px",
-          maxWidth: "500px",
-          width: "90%",
-          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-          maxHeight: "80vh",
-          overflowY: "auto",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 style={{ marginTop: 0 }}>Add Item to List</h2>
+    <Dialog open onOpenChange={(open) => (!open ? onCancel() : undefined)}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add Item</DialogTitle>
+          <DialogDescription>Select an item from the catalog and set quantity.</DialogDescription>
+        </DialogHeader>
 
-        {catalogLoading ? (
-          <p>Loading catalog items...</p>
-        ) : catalogError ? (
-          <p style={{ color: "crimson" }}>{catalogError}</p>
-        ) : catalogItems.length === 0 ? (
-          <p>No catalog items available.</p>
-        ) : (
-          <form onSubmit={handleAddItem}>
-            <div style={{ marginBottom: "16px" }}>
-              <label htmlFor="item-select" style={{ display: "block", marginBottom: "4px" }}>
-                Select Item <span style={{ color: "red" }}>*</span>
-              </label>
-              <select
-                id="item-select"
-                value={selectedItemId ?? ""}
-                onChange={(e) => setSelectedItemId(Number(e.target.value))}
-                style={{
-                  width: "100%",
-                  padding: "8px",
-                  border: "1px solid #ccc",
-                  borderRadius: "4px",
-                  fontSize: "14px",
-                  boxSizing: "border-box",
-                }}
-              >
-                {catalogItems.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name} ({item.category})
-                  </option>
-                ))}
-              </select>
-            </div>
+        {catalogLoading ? <p className="text-sm text-slate-500">Loading catalog items...</p> : null}
+        {catalogError ? <p className="text-sm text-red-600">{catalogError}</p> : null}
 
-            <div style={{ marginBottom: "16px" }}>
-              <label htmlFor="quantity" style={{ display: "block", marginBottom: "4px" }}>
-                Quantity <span style={{ color: "red" }}>*</span>
-              </label>
-              <input
-                id="quantity"
-                type="number"
-                min="1"
-                value={quantity}
-                onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
-                style={{
-                  width: "100%",
-                  padding: "8px",
-                  border: "1px solid #ccc",
-                  borderRadius: "4px",
-                  fontSize: "14px",
-                  boxSizing: "border-box",
-                }}
-              />
-            </div>
-
-            <div style={{ marginBottom: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-              <input
-                id="is-checked"
-                type="checkbox"
-                checked={isChecked}
-                onChange={(e) => setIsChecked(e.target.checked)}
-                style={{ cursor: "pointer" }}
-              />
-              <label htmlFor="is-checked" style={{ cursor: "pointer" }}>
-                Mark as checked
-              </label>
-            </div>
-
-            {submitError ? (
-              <div style={{ color: "crimson", marginBottom: "16px", fontSize: "14px" }}>
-                {submitError}
+        {!catalogLoading && !catalogError ? (
+          catalogItems.length === 0 ? (
+            <p className="text-sm text-slate-500">No catalog items available.</p>
+          ) : (
+            <form className="space-y-4" onSubmit={handleAddItem}>
+              <div className="space-y-1.5">
+                <label htmlFor="item-select" className="text-sm font-medium text-slate-700">
+                  Choose Item
+                </label>
+                <Input
+                  id="item-select"
+                  list="catalog-item-options"
+                  placeholder="Search item"
+                  value={itemQuery}
+                  onChange={(event) => handleItemQueryChange(event.target.value)}
+                  disabled={loading || catalogItems.length === 0}
+                />
+                <datalist id="catalog-item-options">
+                  {filteredCatalogItems.map((item) => (
+                    <option key={item.id} value={`${item.name} (${item.category})`} />
+                  ))}
+                </datalist>
+                {itemQuery.trim().length > 0 && filteredCatalogItems.length === 0 ? (
+                  <p className="text-xs text-slate-500">No items match your search.</p>
+                ) : null}
               </div>
-            ) : null}
 
-            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-              <button
-                type="button"
-                onClick={onCancel}
-                disabled={loading}
-                style={{
-                  padding: "8px 16px",
-                  backgroundColor: "#f0f0f0",
-                  border: "1px solid #ccc",
-                  borderRadius: "4px",
-                  cursor: loading ? "not-allowed" : "pointer",
-                  fontSize: "14px",
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={loading}
-                style={{
-                  padding: "8px 16px",
-                  backgroundColor: "#007bff",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "4px",
-                  cursor: loading ? "not-allowed" : "pointer",
-                  fontSize: "14px",
-                }}
-              >
-                {loading ? "Adding..." : "Add Item"}
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
-    </div>
+              <div className="space-y-1.5">
+                <label htmlFor="quantity" className="text-sm font-medium text-slate-700">
+                  Quantity
+                </label>
+                <Input
+                  id="quantity"
+                  type="number"
+                  min="1"
+                  value={quantity}
+                  onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
+                  disabled={loading}
+                />
+              </div>
+
+              {submitError ? <p className="text-sm text-red-600">{submitError}</p> : null}
+
+              <DialogFooter>
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  className="min-w-32 bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
+                >
+                  {loading ? "Adding..." : "Add Item"}
+                </Button>
+              </DialogFooter>
+            </form>
+          )
+        ) : null}
+      </DialogContent>
+    </Dialog>
   );
 }

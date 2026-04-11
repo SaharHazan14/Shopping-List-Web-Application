@@ -1,19 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { Check, ChevronLeft, Minus, Plus, Trash2, User, Users } from "lucide-react";
 import {
   deleteListItem,
-  deleteListMember,
   getListById,
   getListItems,
   getListMembers,
+  updateListItem,
 } from "../api/list";
 import { getCurrentUser } from "../api/user";
-import type { CurrentUser } from "../types/user";
 import type { ListDetails, ListItem, ListMember } from "../types/list";
+import type { CurrentUser } from "../types/user";
 import AddItemToListModal from "../components/AddItemToListModal";
-import AddListMemberModal from "../components/AddListMemberModal";
-import UpdateListItemModal from "../components/UpdateListItemModal";
-import UpdateListMemberModal from "../components/UpdateListMemberModal";
+import ManageCollaboratorsDialog from "../components/ManageCollaboratorsDialog";
+import { Button } from "../components/ui/button";
+import { Card, CardContent } from "../components/ui/card";
 
 export default function ListPage() {
   const { listId } = useParams<{ listId: string }>();
@@ -24,18 +25,12 @@ export default function ListPage() {
   const [loading, setLoading] = useState(true);
   const [itemsLoading, setItemsLoading] = useState(true);
   const [membersLoading, setMembersLoading] = useState(true);
-  const [userLoading, setUserLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [itemsError, setItemsError] = useState<string | null>(null);
   const [membersError, setMembersError] = useState<string | null>(null);
   const [showAddItemModal, setShowAddItemModal] = useState(false);
-  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
-  const [editingItem, setEditingItem] = useState<ListItem | null>(null);
-  const [editingMember, setEditingMember] = useState<ListMember | null>(null);
-  const [deletingItemId, setDeletingItemId] = useState<number | null>(null);
-  const [deleteLoading, setDeleteLoading] = useState(false);
-  const [deletingMemberId, setDeletingMemberId] = useState<number | null>(null);
-  const [memberDeleteLoading, setMemberDeleteLoading] = useState(false);
+  const [showCollaboratorsDialog, setShowCollaboratorsDialog] = useState(false);
+  const [itemActionLoadingId, setItemActionLoadingId] = useState<number | null>(null);
 
   const parsedListId = useMemo(() => {
     if (!listId) return null;
@@ -43,21 +38,17 @@ export default function ListPage() {
     return Number.isFinite(value) ? value : null;
   }, [listId]);
 
-  const isOwner = currentUser !== null && list !== null && currentUser.id === list.creatorId;
-
   useEffect(() => {
-    async function fetchCurrentUser() {
+    async function fetchCurrentUserProfile() {
       try {
-        const user = await getCurrentUser();
-        setCurrentUser(user);
+        const profile = await getCurrentUser();
+        setCurrentUser(profile);
       } catch (fetchError) {
         console.error("Failed to fetch current user:", fetchError);
-      } finally {
-        setUserLoading(false);
       }
     }
 
-    fetchCurrentUser();
+    fetchCurrentUserProfile();
   }, []);
 
   useEffect(() => {
@@ -134,222 +125,253 @@ export default function ListPage() {
 
   const handleDeleteItem = async (itemId: number) => {
     if (parsedListId === null) return;
+
+    const confirmed = window.confirm("Remove this item from the list?");
+    if (!confirmed) return;
+
     try {
-      setDeleteLoading(true);
+      setItemActionLoadingId(itemId);
       await deleteListItem(parsedListId, itemId);
-      setDeletingItemId(null);
-      fetchItems();
+      await fetchItems();
     } catch (err) {
       console.error("Failed to delete item:", err);
       setItemsError("Failed to delete item.");
-      setDeletingItemId(null);
     } finally {
-      setDeleteLoading(false);
+      setItemActionLoadingId(null);
     }
   };
 
-  const handleDeleteMember = async (memberId: number) => {
+  const handleAdjustQuantity = async (item: ListItem, delta: number) => {
+    if (parsedListId === null) return;
+
+    const nextQuantity = Math.max(1, item.quantity + delta);
+    if (nextQuantity === item.quantity) return;
+
+    try {
+      setItemActionLoadingId(item.itemId);
+      await updateListItem(parsedListId, item.itemId, { quantity: nextQuantity });
+      await fetchItems();
+    } catch (err) {
+      console.error("Failed to update item quantity:", err);
+      setItemsError("Failed to update item quantity.");
+    } finally {
+      setItemActionLoadingId(null);
+    }
+  };
+
+  const handleToggleChecked = async (item: ListItem) => {
     if (parsedListId === null) return;
 
     try {
-      setMemberDeleteLoading(true);
-      await deleteListMember(parsedListId, memberId);
-      setDeletingMemberId(null);
-      await fetchMembers();
+      setItemActionLoadingId(item.itemId);
+      await updateListItem(parsedListId, item.itemId, { isChecked: !item.isChecked });
+      await fetchItems();
     } catch (err) {
-      console.error("Failed to delete collaborator:", err);
-      setMembersError("Failed to remove collaborator.");
-      setDeletingMemberId(null);
+      console.error("Failed to update item status:", err);
+      setItemsError("Failed to update item status.");
     } finally {
-      setMemberDeleteLoading(false);
+      setItemActionLoadingId(null);
     }
   };
 
-  const existingMemberIds = useMemo(
-    () => listMembers.map((member) => member.memberId),
+  const owner = useMemo(
+    () => listMembers.find((member) => member.role === "OWNER") ?? null,
     [listMembers],
+  );
+  const canManageCollaborators = currentUser !== null && list !== null && currentUser.id === list.creatorId;
+
+  const creatorEmail = owner?.email ?? `creator-${list?.creatorId ?? "unknown"}@unknown`;
+
+  const totalItems = listItems.length;
+  const uncheckedItems = useMemo(
+    () => listItems.filter((item) => !item.isChecked),
+    [listItems],
+  );
+  const checkedItems = useMemo(
+    () => listItems.filter((item) => item.isChecked),
+    [listItems],
+  );
+  const checkedCount = checkedItems.length;
+  const progress = totalItems > 0 ? Math.round((checkedCount / totalItems) * 100) : 0;
+
+  const renderItemRow = (item: ListItem) => (
+    <li
+      key={item.itemId}
+      className={`flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 shadow-sm transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md ${
+        item.isChecked
+          ? "border-emerald-200 bg-emerald-50/70"
+          : "border-slate-200 bg-white"
+      }`}
+    >
+      <button
+        type="button"
+        onClick={() => handleToggleChecked(item)}
+        disabled={itemActionLoadingId === item.itemId}
+        className={`group flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors duration-200 ease-out ${
+          item.isChecked ? "hover:bg-emerald-100/70" : "hover:bg-slate-100"
+        }`}
+      >
+        <span
+          className={`flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all duration-200 ease-out ${
+            item.isChecked
+              ? "border-emerald-500 bg-emerald-500/15"
+              : "border-slate-300 group-hover:border-slate-400"
+          }`}
+        >
+          {item.isChecked ? <Check className="h-3 w-3 text-emerald-600" /> : null}
+        </span>
+        <span
+          className={`truncate text-[15px] font-medium ${
+            item.isChecked ? "text-slate-400 line-through opacity-75" : "text-slate-900"
+          }`}
+        >
+          {item.itemName}
+        </span>
+      </button>
+
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => handleAdjustQuantity(item, -1)}
+          disabled={itemActionLoadingId === item.itemId || item.quantity <= 1}
+          aria-label={`Decrease ${item.itemName} quantity`}
+          className="h-8 w-8 cursor-pointer rounded-full p-0 text-slate-600 transition-all duration-200 ease-out hover:bg-slate-100 hover:text-slate-900 active:scale-95"
+        >
+          <Minus className="h-4 w-4" />
+        </Button>
+        <span className="w-6 text-center text-sm font-semibold text-slate-600">{item.quantity}</span>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => handleAdjustQuantity(item, 1)}
+          disabled={itemActionLoadingId === item.itemId}
+          aria-label={`Increase ${item.itemName} quantity`}
+          className="h-8 w-8 cursor-pointer rounded-full p-0 text-slate-600 transition-all duration-200 ease-out hover:bg-slate-100 hover:text-slate-900 active:scale-95"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => handleDeleteItem(item.itemId)}
+          disabled={itemActionLoadingId === item.itemId}
+          aria-label={`Delete ${item.itemName}`}
+          className="h-8 w-8 cursor-pointer rounded-full p-0 text-red-500 transition-all duration-200 ease-out hover:bg-red-50 hover:text-red-600 active:scale-95"
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+    </li>
   );
 
   return (
-    <div style={{ padding: "20px" }}>
-      <p>
-        <Link to="/dashboard">← Back to dashboard</Link>
-      </p>
-      <h1>List Details</h1>
+    <div className="min-h-screen bg-slate-50/80">
+      <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
+        <Link
+          to="/dashboard"
+          className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition-colors duration-200 hover:text-slate-700"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Back to lists
+        </Link>
 
-      {loading ? <p>Loading list details...</p> : null}
-      {error ? <p style={{ color: "crimson" }}>{error}</p> : null}
+        {loading ? <p className="mt-6 text-sm text-slate-500">Loading list details...</p> : null}
+        {error ? <p className="mt-6 text-sm text-red-600">{error}</p> : null}
 
-      {!loading && !error && list ? (
-        <>
-          <h2>{list.title}</h2>
-          <p>{list.description ?? "No description"}</p>
+        {!loading && !error && list ? (
+          <div className="mt-5 space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="inline-flex items-center gap-2 text-slate-600">
+                <User className="h-4 w-4" />
+                <span className="text-sm text-slate-500">{creatorEmail}</span>
+              </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "32px" }}>
-            <h3 style={{ margin: 0 }}>Items</h3>
-            <button
-              onClick={() => setShowAddItemModal(true)}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "#007bff",
-                color: "white",
-                border: "none",
-                borderRadius: "4px",
-                cursor: "pointer",
-                fontSize: "14px",
-              }}
-            >
-              + Add Item
-            </button>
-          </div>
-          {itemsLoading ? (
-            <p>Loading items...</p>
-          ) : itemsError ? (
-            <p style={{ color: "crimson" }}>{itemsError}</p>
-          ) : listItems.length === 0 ? (
-            <p>No items in this list yet.</p>
-          ) : (
-            <ul style={{ paddingLeft: "20px" }}>
-              {listItems.map((item) => (
-                <li key={item.itemId} style={{ marginBottom: "12px" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={item.isChecked}
-                      disabled
-                      style={{ cursor: "pointer" }}
-                    />
-                    <span
-                      style={{
-                        textDecoration: item.isChecked ? "line-through" : "none",
-                        color: item.isChecked ? "#999" : "inherit",
-                      }}
-                    >
-                      {item.itemName}
-                    </span>
-                  </div>
-                  <div style={{ marginLeft: "28px", fontSize: "14px", color: "#666" }}>
-                    Quantity: {item.quantity}
-                  </div>
-                  <div style={{ marginLeft: "28px", marginTop: "8px", display: "flex", gap: "8px" }}>
-                    <button
-                      onClick={() => setEditingItem(item)}
-                      style={{
-                        padding: "4px 12px",
-                        backgroundColor: "#28a745",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "4px",
-                        cursor: "pointer",
-                        fontSize: "12px",
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => setDeletingItemId(item.itemId)}
-                      style={{
-                        padding: "4px 12px",
-                        backgroundColor: "#dc3545",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "4px",
-                        cursor: "pointer",
-                        fontSize: "12px",
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "32px" }}>
-            <h3 style={{ margin: 0 }}>Collaborators</h3>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              {userLoading ? (
-                <span style={{ fontSize: "14px", color: "#666" }}>Checking permissions...</span>
-              ) : null}
-              {isOwner ? (
-                <button
-                  onClick={() => setShowAddMemberModal(true)}
-                  style={{
-                    padding: "8px 16px",
-                    backgroundColor: "#007bff",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                    fontSize: "14px",
-                  }}
-                >
-                  + Add Collaborator
-                </button>
-              ) : null}
+              <Button
+                type="button"
+                variant="outline"
+                className="gap-2 transition-all duration-200 hover:shadow-sm"
+                onClick={() => setShowCollaboratorsDialog(true)}
+              >
+                <Users className="h-4 w-4" />
+                Collaborators
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                  {membersLoading ? "..." : listMembers.length}
+                </span>
+              </Button>
             </div>
+            {membersError ? <p className="text-sm text-red-600">{membersError}</p> : null}
+
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight text-slate-900">{list.title}</h1>
+              <p className="mt-2 text-sm text-slate-500">{list.description || "No description"}</p>
+            </div>
+
+            <Card className="rounded-xl border border-slate-200 shadow-sm">
+              <CardContent className="space-y-3 py-5">
+                <div className="flex items-center justify-between text-slate-700">
+                  <span className="text-xl font-semibold text-slate-900">{checkedCount}/{totalItems} items</span>
+                  <span className="text-sm font-medium text-slate-500">{progress}% complete</span>
+                </div>
+                <div className="h-3.5 overflow-hidden rounded-full bg-slate-200/90">
+                  <div
+                    className="h-full rounded-full bg-emerald-500 transition-all duration-300 ease-out"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-slate-900">Items</h2>
+              <Button
+                onClick={() => setShowAddItemModal(true)}
+                className="bg-emerald-600 transition-all duration-200 hover:bg-emerald-700 hover:shadow-sm active:scale-[0.99]"
+              >
+                Add Item
+              </Button>
+            </div>
+
+            {itemsLoading ? <p className="text-sm text-slate-500">Loading items...</p> : null}
+            {itemsError ? <p className="text-sm text-red-600">{itemsError}</p> : null}
+
+            {!itemsLoading && !itemsError ? (
+              listItems.length === 0 ? (
+                <Card className="rounded-xl border border-slate-200 shadow-sm">
+                  <CardContent className="py-8 text-center text-sm text-slate-500">No items in this list yet.</CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      To Buy ({uncheckedItems.length})
+                    </p>
+                    {uncheckedItems.length === 0 ? (
+                      <Card className="rounded-xl border border-slate-200 shadow-sm">
+                        <CardContent className="py-4 text-sm text-slate-500">No unchecked items.</CardContent>
+                      </Card>
+                    ) : (
+                      <ul className="space-y-2.5">{uncheckedItems.map(renderItemRow)}</ul>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Completed ({checkedItems.length})
+                    </p>
+                    {checkedItems.length === 0 ? (
+                      <Card className="rounded-xl border border-emerald-200/80 bg-emerald-50/40 shadow-sm">
+                        <CardContent className="py-4 text-sm text-slate-500">No completed items yet.</CardContent>
+                      </Card>
+                    ) : (
+                      <ul className="space-y-2.5">{checkedItems.map(renderItemRow)}</ul>
+                    )}
+                  </div>
+                </div>
+              )
+            ) : null}
           </div>
-          {membersLoading ? (
-            <p>Loading collaborators...</p>
-          ) : membersError ? (
-            <p style={{ color: "crimson" }}>{membersError}</p>
-          ) : listMembers.length === 0 ? (
-            <p>No collaborators yet.</p>
-          ) : (
-            <ul style={{ paddingLeft: "20px" }}>
-              {listMembers.map((member) => (
-                <li key={member.memberId} style={{ marginBottom: "12px" }}>
-                  <div>
-                    <strong>{member.email}</strong>
-                  </div>
-                  <div style={{ fontSize: "14px", color: "#666" }}>
-                    Role: <span style={{ fontWeight: "500" }}>{member.role}</span>
-                  </div>
-                  {isOwner && member.role !== "OWNER" ? (
-                    <div style={{ marginTop: "8px", display: "flex", gap: "8px" }}>
-                      <button
-                        onClick={() => setEditingMember(member)}
-                        style={{
-                          padding: "4px 12px",
-                          backgroundColor: "#28a745",
-                          color: "white",
-                          border: "none",
-                          borderRadius: "4px",
-                          cursor: "pointer",
-                          fontSize: "12px",
-                        }}
-                      >
-                        Edit Role
-                      </button>
-                      <button
-                        onClick={() => setDeletingMemberId(member.memberId)}
-                        style={{
-                          padding: "4px 12px",
-                          backgroundColor: "#dc3545",
-                          color: "white",
-                          border: "none",
-                          borderRadius: "4px",
-                          cursor: "pointer",
-                          fontSize: "12px",
-                        }}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      ) : null}
+        ) : null}
 
       {showAddItemModal && parsedListId !== null ? (
         <AddItemToListModal
@@ -362,163 +384,20 @@ export default function ListPage() {
         />
       ) : null}
 
-      {editingItem && parsedListId !== null ? (
-        <UpdateListItemModal
+      {showCollaboratorsDialog && parsedListId !== null && list ? (
+        <ManageCollaboratorsDialog
+          open={showCollaboratorsDialog}
           listId={parsedListId}
-          item={editingItem}
-          onUpdated={() => {
-            setEditingItem(null);
-            fetchItems();
+          listTitle={list.title}
+          members={listMembers}
+          canManage={canManageCollaborators}
+          onOpenChange={setShowCollaboratorsDialog}
+          onMembersChanged={() => {
+            void fetchMembers();
           }}
-          onCancel={() => setEditingItem(null)}
         />
       ) : null}
-
-      {editingMember && parsedListId !== null ? (
-        <UpdateListMemberModal
-          listId={parsedListId}
-          member={editingMember}
-          onUpdated={() => {
-            setEditingMember(null);
-            fetchMembers();
-          }}
-          onCancel={() => setEditingMember(null)}
-        />
-      ) : null}
-
-      {showAddMemberModal && parsedListId !== null ? (
-        <AddListMemberModal
-          listId={parsedListId}
-          existingMemberIds={existingMemberIds}
-          onAdded={() => {
-            setShowAddMemberModal(false);
-            fetchMembers();
-          }}
-          onCancel={() => setShowAddMemberModal(false)}
-        />
-      ) : null}
-
-      {deletingItemId !== null ? (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: "rgba(0, 0, 0, 0.5)",
-            zIndex: 1000,
-          }}
-          onClick={() => setDeletingItemId(null)}
-        >
-          <div
-            style={{
-              backgroundColor: "white",
-              borderRadius: "8px",
-              padding: "24px",
-              maxWidth: "400px",
-              width: "90%",
-              boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 style={{ marginTop: 0 }}>Remove Item?</h2>
-            <p>Are you sure you want to remove this item from the list?</p>
-            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-              <button
-                onClick={() => setDeletingItemId(null)}
-                disabled={deleteLoading}
-                style={{
-                  padding: "8px 16px",
-                  backgroundColor: "#f0f0f0",
-                  border: "1px solid #ccc",
-                  borderRadius: "4px",
-                  cursor: deleteLoading ? "not-allowed" : "pointer",
-                  fontSize: "14px",
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleDeleteItem(deletingItemId)}
-                disabled={deleteLoading}
-                style={{
-                  padding: "8px 16px",
-                  backgroundColor: "#dc3545",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "4px",
-                  cursor: deleteLoading ? "not-allowed" : "pointer",
-                  fontSize: "14px",
-                }}
-              >
-                {deleteLoading ? "Removing..." : "Remove"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {deletingMemberId !== null ? (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: "rgba(0, 0, 0, 0.5)",
-            zIndex: 1000,
-          }}
-          onClick={() => setDeletingMemberId(null)}
-        >
-          <div
-            style={{
-              backgroundColor: "white",
-              borderRadius: "8px",
-              padding: "24px",
-              maxWidth: "400px",
-              width: "90%",
-              boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-            }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h2 style={{ marginTop: 0 }}>Remove Collaborator?</h2>
-            <p>Are you sure you want to remove this collaborator from the list?</p>
-            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-              <button
-                onClick={() => setDeletingMemberId(null)}
-                disabled={memberDeleteLoading}
-                style={{
-                  padding: "8px 16px",
-                  backgroundColor: "#f0f0f0",
-                  border: "1px solid #ccc",
-                  borderRadius: "4px",
-                  cursor: memberDeleteLoading ? "not-allowed" : "pointer",
-                  fontSize: "14px",
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleDeleteMember(deletingMemberId)}
-                disabled={memberDeleteLoading}
-                style={{
-                  padding: "8px 16px",
-                  backgroundColor: "#dc3545",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "4px",
-                  cursor: memberDeleteLoading ? "not-allowed" : "pointer",
-                  fontSize: "14px",
-                }}
-              >
-                {memberDeleteLoading ? "Removing..." : "Remove"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      </div>
     </div>
   );
 }
