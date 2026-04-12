@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { Check, ChevronLeft, Minus, Plus, Trash2, User, Users } from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import axios from "axios";
+import { Check, ChevronLeft, Minus, PencilLine, Plus, Trash2, User, Users } from "lucide-react";
 import {
+  deleteList,
   deleteListItem,
   getListById,
   getListItems,
   getListMembers,
+  updateListDetails,
   updateListItem,
 } from "../api/list";
 import { getCurrentUser } from "../api/user";
@@ -15,8 +18,18 @@ import AddItemToListModal from "../components/AddItemToListModal";
 import ManageCollaboratorsDialog from "../components/ManageCollaboratorsDialog";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { Input } from "../components/ui/input";
 
 export default function ListPage() {
+  const navigate = useNavigate();
   const { listId } = useParams<{ listId: string }>();
   const [list, setList] = useState<ListDetails | null>(null);
   const [listItems, setListItems] = useState<ListItem[]>([]);
@@ -30,6 +43,12 @@ export default function ListPage() {
   const [membersError, setMembersError] = useState<string | null>(null);
   const [showAddItemModal, setShowAddItemModal] = useState(false);
   const [showCollaboratorsDialog, setShowCollaboratorsDialog] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [updateLoading, setUpdateLoading] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [deleteListLoading, setDeleteListLoading] = useState(false);
   const [itemActionLoadingId, setItemActionLoadingId] = useState<number | null>(null);
 
   const parsedListId = useMemo(() => {
@@ -124,7 +143,7 @@ export default function ListPage() {
   }, [parsedListId]);
 
   const handleDeleteItem = async (itemId: number) => {
-    if (parsedListId === null) return;
+    if (parsedListId === null || !canModifyItems) return;
 
     const confirmed = window.confirm("Remove this item from the list?");
     if (!confirmed) return;
@@ -142,7 +161,7 @@ export default function ListPage() {
   };
 
   const handleAdjustQuantity = async (item: ListItem, delta: number) => {
-    if (parsedListId === null) return;
+    if (parsedListId === null || !canModifyItems) return;
 
     const nextQuantity = Math.max(1, item.quantity + delta);
     if (nextQuantity === item.quantity) return;
@@ -160,7 +179,7 @@ export default function ListPage() {
   };
 
   const handleToggleChecked = async (item: ListItem) => {
-    if (parsedListId === null) return;
+    if (parsedListId === null || !canModifyItems) return;
 
     try {
       setItemActionLoadingId(item.itemId);
@@ -178,7 +197,13 @@ export default function ListPage() {
     () => listMembers.find((member) => member.role === "OWNER") ?? null,
     [listMembers],
   );
+  const currentMembership = useMemo(() => {
+    if (!currentUser) return null;
+    return listMembers.find((member) => member.memberId === currentUser.id) ?? null;
+  }, [currentUser, listMembers]);
   const canManageCollaborators = currentUser !== null && list !== null && currentUser.id === list.creatorId;
+  const canManageList = canManageCollaborators;
+  const canModifyItems = canManageList || currentMembership?.role === "EDITOR";
 
   const creatorEmail = owner?.email ?? `creator-${list?.creatorId ?? "unknown"}@unknown`;
 
@@ -193,6 +218,95 @@ export default function ListPage() {
   );
   const checkedCount = checkedItems.length;
   const progress = totalItems > 0 ? Math.round((checkedCount / totalItems) * 100) : 0;
+  const canUpdateList = editTitle.trim().length >= 2;
+
+  const openEditDialog = () => {
+    if (!list) return;
+
+    setEditTitle(list.title);
+    setEditDescription(list.description ?? "");
+    setUpdateError(null);
+    setIsEditDialogOpen(true);
+  };
+
+  const handleUpdateList = async () => {
+    if (parsedListId === null || !list) return;
+
+    const trimmedTitle = editTitle.trim();
+    const trimmedDescription = editDescription.trim();
+    const payload: { title?: string; description?: string } = {};
+
+    if (trimmedTitle.length < 2) {
+      setUpdateError("Title must be at least 2 characters.");
+      return;
+    }
+
+    if (trimmedTitle !== list.title) {
+      payload.title = trimmedTitle;
+    }
+
+    if (trimmedDescription !== (list.description ?? "")) {
+      payload.description = trimmedDescription;
+    }
+
+    if (!payload.title && payload.description === undefined) {
+      setUpdateError("Make a change before saving.");
+      return;
+    }
+
+    try {
+      setUpdateLoading(true);
+      setUpdateError(null);
+      await updateListDetails(parsedListId, payload);
+      setIsEditDialogOpen(false);
+
+      const refreshed = await getListById(parsedListId);
+      setList(refreshed);
+    } catch (error) {
+      console.error("Failed to update list:", error);
+
+      if (axios.isAxiosError(error)) {
+        const responseData = error.response?.data;
+
+        if (typeof responseData === "string") {
+          setUpdateError(responseData);
+        } else if (
+          responseData &&
+          typeof responseData === "object" &&
+          "message" in responseData &&
+          typeof responseData.message === "string"
+        ) {
+          setUpdateError(responseData.message);
+        } else {
+          setUpdateError(error.message || "Failed to update list.");
+        }
+      } else if (error instanceof Error) {
+        setUpdateError(error.message);
+      } else {
+        setUpdateError("Failed to update list.");
+      }
+    } finally {
+      setUpdateLoading(false);
+    }
+  };
+
+  const handleDeleteList = async () => {
+    if (parsedListId === null || !list) return;
+
+    const confirmed = window.confirm(`Delete list "${list.title}"? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      setDeleteListLoading(true);
+      await deleteList(parsedListId);
+      navigate("/dashboard", { replace: true });
+    } catch (error) {
+      console.error("Failed to delete list:", error);
+      setError("Failed to delete list.");
+    } finally {
+      setDeleteListLoading(false);
+    }
+  };
 
   const renderItemRow = (item: ListItem) => (
     <li
@@ -206,9 +320,13 @@ export default function ListPage() {
       <button
         type="button"
         onClick={() => handleToggleChecked(item)}
-        disabled={itemActionLoadingId === item.itemId}
+        disabled={itemActionLoadingId === item.itemId || !canModifyItems}
         className={`group flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors duration-200 ease-out ${
-          item.isChecked ? "hover:bg-emerald-100/70" : "hover:bg-slate-100"
+          canModifyItems
+            ? item.isChecked
+              ? "hover:bg-emerald-100/70"
+              : "hover:bg-slate-100"
+            : "cursor-default"
         }`}
       >
         <span
@@ -229,39 +347,43 @@ export default function ListPage() {
         </span>
       </button>
 
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => handleAdjustQuantity(item, -1)}
-          disabled={itemActionLoadingId === item.itemId || item.quantity <= 1}
-          aria-label={`Decrease ${item.itemName} quantity`}
-          className="h-8 w-8 cursor-pointer rounded-full p-0 text-slate-600 transition-all duration-200 ease-out hover:bg-slate-100 hover:text-slate-900 active:scale-95"
-        >
-          <Minus className="h-4 w-4" />
-        </Button>
-        <span className="w-6 text-center text-sm font-semibold text-slate-600">{item.quantity}</span>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => handleAdjustQuantity(item, 1)}
-          disabled={itemActionLoadingId === item.itemId}
-          aria-label={`Increase ${item.itemName} quantity`}
-          className="h-8 w-8 cursor-pointer rounded-full p-0 text-slate-600 transition-all duration-200 ease-out hover:bg-slate-100 hover:text-slate-900 active:scale-95"
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => handleDeleteItem(item.itemId)}
-          disabled={itemActionLoadingId === item.itemId}
-          aria-label={`Delete ${item.itemName}`}
-          className="h-8 w-8 cursor-pointer rounded-full p-0 text-red-500 transition-all duration-200 ease-out hover:bg-red-50 hover:text-red-600 active:scale-95"
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      </div>
+      {canModifyItems ? (
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => handleAdjustQuantity(item, -1)}
+            disabled={itemActionLoadingId === item.itemId || item.quantity <= 1}
+            aria-label={`Decrease ${item.itemName} quantity`}
+            className="h-8 w-8 cursor-pointer rounded-full p-0 text-slate-600 transition-all duration-200 ease-out hover:bg-slate-100 hover:text-slate-900 active:scale-95"
+          >
+            <Minus className="h-4 w-4" />
+          </Button>
+          <span className="w-6 text-center text-sm font-semibold text-slate-600">{item.quantity}</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => handleAdjustQuantity(item, 1)}
+            disabled={itemActionLoadingId === item.itemId}
+            aria-label={`Increase ${item.itemName} quantity`}
+            className="h-8 w-8 cursor-pointer rounded-full p-0 text-slate-600 transition-all duration-200 ease-out hover:bg-slate-100 hover:text-slate-900 active:scale-95"
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => handleDeleteItem(item.itemId)}
+            disabled={itemActionLoadingId === item.itemId}
+            aria-label={`Delete ${item.itemName}`}
+            className="h-8 w-8 cursor-pointer rounded-full p-0 text-red-500 transition-all duration-200 ease-out hover:bg-red-50 hover:text-red-600 active:scale-95"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : (
+        <span className="text-sm font-medium text-slate-500">Qty {item.quantity}</span>
+      )}
     </li>
   );
 
@@ -281,24 +403,47 @@ export default function ListPage() {
 
         {!loading && !error && list ? (
           <div className="mt-5 space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="inline-flex items-center gap-2 text-slate-600">
-                <User className="h-4 w-4" />
-                <span className="text-sm text-slate-500">{creatorEmail}</span>
-              </div>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-3">
+                <div className="inline-flex items-center gap-2 text-slate-600">
+                  <User className="h-4 w-4" />
+                  <span className="text-sm text-slate-500">{creatorEmail}</span>
+                </div>
 
-              <Button
-                type="button"
-                variant="outline"
-                className="gap-2 transition-all duration-200 hover:shadow-sm"
-                onClick={() => setShowCollaboratorsDialog(true)}
-              >
-                <Users className="h-4 w-4" />
-                Collaborators
-                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-                  {membersLoading ? "..." : listMembers.length}
-                </span>
-              </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2 transition-all duration-200 hover:shadow-sm"
+                    onClick={() => setShowCollaboratorsDialog(true)}
+                  >
+                    <Users className="h-4 w-4" />
+                    Collaborators
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                      {membersLoading ? "..." : listMembers.length}
+                    </span>
+                  </Button>
+
+                  {canManageList ? (
+                    <>
+                      <Button type="button" variant="outline" className="gap-2" onClick={openEditDialog}>
+                        <PencilLine className="h-4 w-4" />
+                        Edit List
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        className="gap-2"
+                        onClick={() => void handleDeleteList()}
+                        disabled={deleteListLoading}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        {deleteListLoading ? "Deleting..." : "Delete List"}
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
+              </div>
             </div>
             {membersError ? <p className="text-sm text-red-600">{membersError}</p> : null}
 
@@ -324,12 +469,16 @@ export default function ListPage() {
 
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold text-slate-900">Items</h2>
-              <Button
-                onClick={() => setShowAddItemModal(true)}
-                className="bg-emerald-600 transition-all duration-200 hover:bg-emerald-700 hover:shadow-sm active:scale-[0.99]"
-              >
-                Add Item
-              </Button>
+              {canModifyItems ? (
+                <Button
+                  onClick={() => setShowAddItemModal(true)}
+                  className="bg-emerald-600 transition-all duration-200 hover:bg-emerald-700 hover:shadow-sm active:scale-[0.99]"
+                >
+                  Add Item
+                </Button>
+              ) : (
+                <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-400">Viewer access</span>
+              )}
             </div>
 
             {itemsLoading ? <p className="text-sm text-slate-500">Loading items...</p> : null}
@@ -397,6 +546,41 @@ export default function ListPage() {
           }}
         />
       ) : null}
+
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit List</DialogTitle>
+            <DialogDescription>Update list title or description.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <Input
+              placeholder="Title"
+              value={editTitle}
+              onChange={(event) => setEditTitle(event.target.value)}
+              disabled={updateLoading}
+            />
+            <Input
+              placeholder="Description"
+              value={editDescription}
+              onChange={(event) => setEditDescription(event.target.value)}
+              disabled={updateLoading}
+            />
+            {updateError ? <p className="text-sm text-red-600">{updateError}</p> : null}
+          </div>
+
+          <DialogFooter>
+            <Button
+              onClick={() => void handleUpdateList()}
+              disabled={updateLoading || !canUpdateList}
+              className="min-w-32 bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
+            >
+              {updateLoading ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       </div>
     </div>
   );

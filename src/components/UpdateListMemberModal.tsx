@@ -2,6 +2,8 @@ import { type ComponentProps, useState } from "react";
 import axios from "axios";
 import { updateListMember } from "../api/list";
 import type { EditableListMemberRole, ListMember, UpdateListMemberPayload } from "../types/list";
+import { Select } from "./ui/select";
+import { Button } from "./ui/button";
 
 interface UpdateListMemberModalProps {
   listId: number;
@@ -82,25 +84,16 @@ export default function UpdateListMemberModal({
             <label htmlFor="member-role" style={{ display: "block", marginBottom: "4px" }}>
               Role
             </label>
-            <select
+            <Select
               id="member-role"
               value={role}
-              onChange={(event) => setRole(event.target.value as EditableListMemberRole)}
-              style={{
-                width: "100%",
-                padding: "8px",
-                border: "1px solid #ccc",
-                borderRadius: "4px",
-                fontSize: "14px",
-                boxSizing: "border-box",
-              }}
-            >
-              {editableRoles.map((editableRole) => (
-                <option key={editableRole} value={editableRole}>
-                  {editableRole}
-                </option>
-              ))}
-            </select>
+              onChange={(value) => setRole(value as EditableListMemberRole)}
+              options={editableRoles.map((editableRole) => ({
+                value: editableRole,
+                label: editableRole,
+              }))}
+              disabled={loading}
+            />
           </div>
 
           {error ? (
@@ -108,36 +101,21 @@ export default function UpdateListMemberModal({
           ) : null}
 
           <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-            <button
+            <Button
               type="button"
               onClick={onCancel}
               disabled={loading}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "#f0f0f0",
-                border: "1px solid #ccc",
-                borderRadius: "4px",
-                cursor: loading ? "not-allowed" : "pointer",
-                fontSize: "14px",
-              }}
+              className="rounded-lg border border-slate-300 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={loading}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "#007bff",
-                color: "white",
-                border: "none",
-                borderRadius: "4px",
-                cursor: loading ? "not-allowed" : "pointer",
-                fontSize: "14px",
-              }}
+              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? "Saving..." : "Save"}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

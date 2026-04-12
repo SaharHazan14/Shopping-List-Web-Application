@@ -3,24 +3,16 @@ import ItemRow from "./ItemRow";
 
 interface ItemListProps {
   lists: UserList[];
-  deletingListId: number | null;
   emptyTitle: string;
   emptyDescription: string;
-  showOwnerActions?: boolean;
   onOpen: (listId: number) => void;
-  onEdit: (list: UserList) => void;
-  onDelete: (list: UserList) => void;
 }
 
 export default function ItemList({
   lists,
-  deletingListId,
   emptyTitle,
   emptyDescription,
-  showOwnerActions = true,
   onOpen,
-  onEdit,
-  onDelete,
 }: ItemListProps) {
   if (lists.length === 0) {
     return (
@@ -37,11 +29,7 @@ export default function ItemList({
         <ItemRow
           key={list.listId}
           list={list}
-          showOwnerActions={showOwnerActions}
           onOpen={onOpen}
-          onEdit={onEdit}
-          onDelete={onDelete}
-          deleting={deletingListId === list.listId}
         />
       ))}
     </div>

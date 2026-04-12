@@ -1,24 +1,15 @@
-import { CheckCircle2, Circle, Trash2, PencilLine, User } from "lucide-react";
+import { CheckCircle2, Circle, User } from "lucide-react";
 import type { UserList } from "../../types/list";
-import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 
 interface ItemRowProps {
   list: UserList;
-  showOwnerActions: boolean;
   onOpen: (listId: number) => void;
-  onEdit: (list: UserList) => void;
-  onDelete: (list: UserList) => void;
-  deleting: boolean;
 }
 
 export default function ItemRow({
   list,
-  showOwnerActions,
   onOpen,
-  onEdit,
-  onDelete,
-  deleting,
 }: ItemRowProps) {
   const total = list.totalItems;
   const checked = list.checkedItems;
@@ -63,35 +54,6 @@ export default function ItemRow({
           </div>
         </div>
 
-        <div className="flex shrink-0 gap-2 self-start">
-          {showOwnerActions ? (
-            <>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onEdit(list);
-                }}
-              >
-                <PencilLine className="mr-1 h-3.5 w-3.5" />
-                Edit
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onDelete(list);
-                }}
-                disabled={deleting}
-              >
-                <Trash2 className="mr-1 h-3.5 w-3.5" />
-                {deleting ? "Deleting" : "Delete"}
-              </Button>
-            </>
-          ) : null}
-        </div>
       </div>
     </Card>
   );

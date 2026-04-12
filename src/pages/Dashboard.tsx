@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
+import { ShoppingCart, ChevronDown, LogOut } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { createList, deleteList, getCurrentUserLists, updateListDetails } from "../api/list";
 import { getCurrentUser } from "../api/user";
@@ -22,6 +23,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [userLoading, setUserLoading] = useState(true);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [lists, setLists] = useState<UserList[]>([]);
   const [listsLoading, setListsLoading] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -211,24 +213,64 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
-        <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900">SyncCart</h1>
-            <p className="mt-2 text-sm font-medium text-slate-700">
-              Plan together. Shop smarter.
-            </p>
-            <p className="mt-1 text-sm text-slate-500">
-              {userLoading ? "Loading user..." : `Welcome back, ${username}`}
-            </p>
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <Button variant="outline" onClick={() => navigate("/items")}>View Items Catalog</Button>
-            <Button
-              onClick={() => setIsCreateOpen(true)}
-              className="bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
-            >
-              Create New List
-            </Button>
+        <header className="mb-8">
+          <div className="flex items-start justify-between">
+            <div>
+              <h1 className="inline-flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
+                <ShoppingCart className="h-7 w-7 text-emerald-600" />
+                SyncCart
+              </h1>
+              <p className="mt-1 text-sm font-medium text-slate-700">
+                Plan together. Shop smarter.
+              </p>
+            </div>
+
+            <div className="flex flex-col items-end gap-3">
+              {/* User Dropdown Menu - Top Right */}
+              <div className="relative">
+                <button
+                  onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 active:bg-slate-100"
+                >
+                  <span>{userLoading ? "..." : username}</span>
+                  <ChevronDown className={`h-4 w-4 transition-transform ${isUserMenuOpen ? "rotate-180" : ""}`} />
+                </button>
+
+                {isUserMenuOpen && (
+                  <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-slate-200 bg-white shadow-lg">
+                    <div className="border-b border-slate-200 px-3 py-2">
+                      <p className="text-xs font-medium text-slate-500">Logged in as</p>
+                      <p className="text-sm font-semibold text-slate-900">{currentUser?.email}</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        localStorage.removeItem("authToken");
+                        navigate("/login");
+                      }}
+                      className="w-full px-3 py-2 text-left text-sm text-red-600 transition-colors hover:bg-red-50 active:bg-red-100 inline-flex items-center gap-2"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      Logout
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-3">
+                <Button
+                  onClick={() => navigate("/items")}
+                  className="bg-amber-500 font-semibold text-white hover:bg-amber-600"
+                >
+                  View Items Catalog
+                </Button>
+                <Button
+                  onClick={() => setIsCreateOpen(true)}
+                  className="bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
+                >
+                  Create New List
+                </Button>
+              </div>
+            </div>
           </div>
         </header>
 
@@ -242,19 +284,17 @@ export default function Dashboard() {
           ) : (
             <>
               <div className="space-y-4">
-                <div>
-                  <h2 className="text-xl font-semibold text-slate-900">My Lists</h2>
-                  <p className="mt-1 text-sm text-slate-500">Lists you own and can fully manage.</p>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h2 className="text-xl font-semibold text-slate-900">My Lists</h2>
+                    <p className="mt-1 text-sm text-slate-500">Lists you own and can fully manage.</p>
+                  </div>
                 </div>
                 <ItemList
                   lists={ownedLists}
-                  deletingListId={deletingListId}
                   emptyTitle="No lists created yet"
                   emptyDescription="Create your first list to start organizing your shopping items."
-                  showOwnerActions
                   onOpen={(listId) => navigate(`/lists/${listId}`)}
-                  onEdit={openEditDialog}
-                  onDelete={(list) => handleDeleteList(list.listId, list.title)}
                 />
               </div>
 
@@ -265,13 +305,9 @@ export default function Dashboard() {
                 </div>
                 <ItemList
                   lists={sharedLists}
-                  deletingListId={deletingListId}
                   emptyTitle="No shared lists yet"
                   emptyDescription="When someone shares a list with you, it will appear here."
-                  showOwnerActions={false}
                   onOpen={(listId) => navigate(`/lists/${listId}`)}
-                  onEdit={openEditDialog}
-                  onDelete={(list) => handleDeleteList(list.listId, list.title)}
                 />
               </div>
             </>

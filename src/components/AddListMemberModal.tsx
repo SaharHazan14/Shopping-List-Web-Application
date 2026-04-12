@@ -4,6 +4,8 @@ import { addListMember } from "../api/list";
 import { getUsers } from "../api/user";
 import type { AddListMemberPayload, EditableListMemberRole } from "../types/list";
 import type { CurrentUser } from "../types/user";
+import { Select } from "./ui/select";
+import { Button } from "./ui/button";
 
 interface AddListMemberModalProps {
   listId: number;
@@ -127,50 +129,33 @@ export default function AddListMemberModal({
                 <label htmlFor="member-id" style={{ display: "block", marginBottom: "4px" }}>
                   User
                 </label>
-                <select
+                <Select
                   id="member-id"
                   value={memberId ?? ""}
-                  onChange={(event) => setMemberId(Number(event.target.value))}
-                  style={{
-                    width: "100%",
-                    padding: "8px",
-                    border: "1px solid #ccc",
-                    borderRadius: "4px",
-                    fontSize: "14px",
-                    boxSizing: "border-box",
-                  }}
-                >
-                  {candidateUsers.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.email}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(value) => setMemberId(value ? Number(value) : null)}
+                  options={candidateUsers.map((user) => ({
+                    value: user.id,
+                    label: user.email,
+                  }))}
+                  placeholder="Select user"
+                  disabled={loading || candidateUsers.length === 0}
+                />
               </div>
 
               <div style={{ marginBottom: "16px" }}>
                 <label htmlFor="member-role" style={{ display: "block", marginBottom: "4px" }}>
                   Role
                 </label>
-                <select
+                <Select
                   id="member-role"
                   value={role}
-                  onChange={(event) => setRole(event.target.value as EditableListMemberRole)}
-                  style={{
-                    width: "100%",
-                    padding: "8px",
-                    border: "1px solid #ccc",
-                    borderRadius: "4px",
-                    fontSize: "14px",
-                    boxSizing: "border-box",
-                  }}
-                >
-                  {roleOptions.map((roleOption) => (
-                    <option key={roleOption} value={roleOption}>
-                      {roleOption}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(value) => setRole(value as EditableListMemberRole)}
+                  options={roleOptions.map((roleOption) => ({
+                    value: roleOption,
+                    label: roleOption,
+                  }))}
+                  disabled={loading}
+                />
               </div>
 
               {submitError ? (
@@ -180,36 +165,21 @@ export default function AddListMemberModal({
               ) : null}
 
               <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-                <button
+                <Button
                   type="button"
                   onClick={onCancel}
                   disabled={loading}
-                  style={{
-                    padding: "8px 16px",
-                    backgroundColor: "#f0f0f0",
-                    border: "1px solid #ccc",
-                    borderRadius: "4px",
-                    cursor: loading ? "not-allowed" : "pointer",
-                    fontSize: "14px",
-                  }}
+                  className="rounded-lg border border-slate-300 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
                   disabled={loading}
-                  style={{
-                    padding: "8px 16px",
-                    backgroundColor: "#007bff",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    cursor: loading ? "not-allowed" : "pointer",
-                    fontSize: "14px",
-                  }}
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {loading ? "Adding..." : "Add Collaborator"}
-                </button>
+                </Button>
               </div>
             </form>
           )
