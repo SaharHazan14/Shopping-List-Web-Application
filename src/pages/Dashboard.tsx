@@ -1,225 +1,393 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import axios from "axios";
+import { ShoppingCart, ChevronDown, LogOut } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { apiFetch } from "../lib/api";
-
-interface User {
-  id: number;
-  cognitoSub?: string;
-  email: string;
-}
-
-interface ShoppingList {
-  listId: number;
-  title: string;
-  description?: string | null;
-  // backend now returns creatorEmail instead of creatorId
-  creatorEmail?: string | null;
-  totalItems: number;
-  checkedItems: number;
-}
-
-function ProgressBar({ percent }: { percent: number }) {
-  return (
-    <div style={{ height: 10, background: "#e6e6e6", borderRadius: 6, overflow: "hidden" }}>
-      <div style={{ width: `${percent}%`, height: "100%", background: "#4caf50" }} />
-    </div>
-  );
-}
+import { createList, deleteList, getCurrentUserLists, updateListDetails } from "../api/list";
+import { getCurrentUser } from "../api/user";
+import type { UserList } from "../types/list";
+import type { CurrentUser } from "../types/user";
+import ItemList from "../components/dashboard/ItemList";
+import { Button } from "../components/ui/button";
+import { Card, CardContent } from "../components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { Input } from "../components/ui/input";
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [user, setUser] = useState<User | null>(null);
-  const [lists, setLists] = useState<ShoppingList[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newDescription, setNewDescription] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [userLoading, setUserLoading] = useState(true);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [lists, setLists] = useState<UserList[]>([]);
+  const [listsLoading, setListsLoading] = useState(true);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [editingList, setEditingList] = useState<UserList | null>(null);
+  const [createTitle, setCreateTitle] = useState("");
+  const [createDescription, setCreateDescription] = useState("");
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [updateLoading, setUpdateLoading] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [deletingListId, setDeletingListId] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  async function fetchLists(signal?: AbortSignal) {
-    setLoading(true);
+  const fetchLists = async () => {
     try {
-      const me = await apiFetch<User>("/user/me", { signal });
-      const myLists = await apiFetch<ShoppingList[]>("/list?includeMember=true", { signal });
-      console.log("[Dashboard] fetched lists:", myLists);
-      setUser(me);
-      setLists(myLists || []);
-      setError(null);
-    } catch (err: any) {
-      if (err && (err.name === 'AbortError' || err.message?.includes('The user aborted a request'))) {
-        return;
-      }
-      setError(err.message || "Unknown error");
+      setListsLoading(true);
+      const response = await getCurrentUserLists();
+      setLists(response);
+    } catch (error) {
+      console.error("Failed to fetch lists:", error);
     } finally {
-      setLoading(false);
+      setListsLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
-    const controller = new AbortController();
-    fetchLists(controller.signal);
-    return () => controller.abort();
+    async function fetchCurrentUser() {
+      try {
+        const user = await getCurrentUser();
+        setCurrentUser(user);
+      } catch (error) {
+        console.error("Failed to fetch current user:", error);
+      } finally {
+        setUserLoading(false);
+      }
+    }
+
+    fetchCurrentUser();
   }, []);
 
-  async function createList() {
-    if (!newTitle.trim()) {
-      alert("Title is required");
+  useEffect(() => {
+    fetchLists();
+  }, []);
+
+  const username = useMemo(() => {
+    if (!currentUser?.email) return "User";
+    const [namePart] = currentUser.email.split("@");
+    return namePart || currentUser.email;
+  }, [currentUser]);
+
+  const ownedLists = useMemo(() => {
+    if (!currentUser?.email) return [];
+
+    return lists.filter(
+      (list) => list.creatorEmail.toLowerCase() === currentUser.email.toLowerCase(),
+    );
+  }, [currentUser?.email, lists]);
+
+  const sharedLists = useMemo(() => {
+    if (!currentUser?.email) return lists;
+
+    return lists.filter(
+      (list) => list.creatorEmail.toLowerCase() !== currentUser.email.toLowerCase(),
+    );
+  }, [currentUser?.email, lists]);
+
+  const handleDeleteList = async (listId: number, title: string) => {
+    const confirmed = window.confirm(`Delete list \"${title}\"? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      setDeletingListId(listId);
+      setDeleteError(null);
+      await deleteList(listId);
+      await fetchLists();
+    } catch (error) {
+      console.error("Failed to delete list:", error);
+      setDeleteError("Failed to delete list.");
+    } finally {
+      setDeletingListId(null);
+    }
+  };
+
+  const handleCreateList = async () => {
+    const trimmedTitle = createTitle.trim();
+    const trimmedDescription = createDescription.trim();
+
+    if (trimmedTitle.length < 2) {
+      setCreateError("Title must be at least 2 characters.");
       return;
     }
 
-    setCreating(true);
     try {
-      await apiFetch('/list', {
-        method: 'POST',
-        body: JSON.stringify({ title: newTitle.trim(), description: newDescription || undefined }),
+      setCreateLoading(true);
+      setCreateError(null);
+      await createList({
+        title: trimmedTitle,
+        ...(trimmedDescription ? { description: trimmedDescription } : {}),
       });
-
-      // refresh lists
+      setCreateTitle("");
+      setCreateDescription("");
+      setIsCreateOpen(false);
       await fetchLists();
-      setShowCreateModal(false);
-      setNewTitle("");
-      setNewDescription("");
-    } catch (err: any) {
-      console.error('[Dashboard] failed to create list:', err);
-      alert('Failed to create list: ' + (err.message || 'unknown'));
+    } catch (error) {
+      console.error("Failed to create list:", error);
+      setCreateError("Failed to create list.");
     } finally {
-      setCreating(false);
+      setCreateLoading(false);
     }
-  }
+  };
 
-  
+  const openEditDialog = (list: UserList) => {
+    setEditingList(list);
+    setEditTitle(list.title);
+    setEditDescription(list.description ?? "");
+    setUpdateError(null);
+  };
 
-  if (loading) return <p>Loading...</p>;
-  if (error) return <p style={{ color: "red" }}>{error}</p>;
+  const handleCreateDialogChange = (open: boolean) => {
+    setIsCreateOpen(open);
+    if (!open) {
+      setCreateTitle("");
+      setCreateDescription("");
+      setCreateError(null);
+    }
+  };
 
-  const shortName = user?.email ? user.email.split("@")[0].replace(/\.|\d+/g, " ") : "";
-  const capitalized = (shortName || "").split(" ").map(s => s ? s[0].toUpperCase()+s.slice(1) : "").join(" ");
+  const canCreateList = createTitle.trim().length >= 2;
+  const canUpdateList = editTitle.trim().length >= 2;
+
+  const handleUpdateList = async () => {
+    if (!editingList) return;
+
+    const payload: { title?: string; description?: string } = {};
+    const trimmedTitle = editTitle.trim();
+    const trimmedDescription = editDescription.trim();
+
+    if (trimmedTitle.length < 2) {
+      setUpdateError("Title must be at least 2 characters.");
+      return;
+    }
+
+    if (trimmedTitle) payload.title = trimmedTitle;
+    if (trimmedDescription) payload.description = trimmedDescription;
+
+    if (!payload.title && !payload.description) {
+      setUpdateError("Provide at least one field: title or description.");
+      return;
+    }
+
+    try {
+      setUpdateLoading(true);
+      setUpdateError(null);
+      await updateListDetails(editingList.listId, payload);
+      setEditingList(null);
+      await fetchLists();
+    } catch (error) {
+      console.error("Failed to update list:", error);
+
+      if (axios.isAxiosError(error)) {
+        const responseData = error.response?.data;
+
+        if (typeof responseData === "string") {
+          setUpdateError(responseData);
+        } else if (
+          responseData &&
+          typeof responseData === "object" &&
+          "message" in responseData &&
+          typeof responseData.message === "string"
+        ) {
+          setUpdateError(responseData.message);
+        } else {
+          setUpdateError(error.message || "Failed to update list.");
+        }
+      } else if (error instanceof Error) {
+        setUpdateError(error.message);
+      } else {
+        setUpdateError("Failed to update list.");
+      }
+    } finally {
+      setUpdateLoading(false);
+    }
+  };
 
   return (
-    <div style={{ padding: 28, maxWidth: 1200, margin: '0 auto' }}>
-      <header style={{ marginBottom: 28, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 12, letterSpacing: 1.5, color: '#6b7280', marginBottom: 8 }}>SHOPPING LISTS</div>
-          <h1 style={{ margin: 0, fontSize: 40, lineHeight: 1.05, color: '#0f172a' }}>Good evening{user ? `, ${capitalized}` : ''}</h1>
-          <div style={{ color: '#6b7280', marginTop: 8 }}>You have <strong style={{ color: '#0f172a' }}>{lists.length}</strong> lists to manage</div>
-        </div>
+    <div className="min-h-screen bg-slate-50">
+      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+        <header className="mb-8">
+          <div className="flex items-start justify-between">
+            <div>
+              <h1 className="inline-flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
+                <ShoppingCart className="h-7 w-7 text-emerald-600" />
+                SyncCart
+              </h1>
+              <p className="mt-1 text-sm font-medium text-slate-700">
+                Plan together. Shop smarter.
+              </p>
+            </div>
 
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <button onClick={() => setShowCreateModal(true)}
-            style={{
-              background: '#10b981',
-              color: 'white',
-              border: 'none',
-              padding: '10px 16px',
-              borderRadius: 10,
-              fontWeight: 600,
-              cursor: 'pointer',
-              boxShadow: '0 6px 18px rgba(16,185,129,0.12)'
-            }}
-          >
-            + New List
-          </button>
-        </div>
-      </header>
+            <div className="flex flex-col items-end gap-3">
+              {/* User Dropdown Menu - Top Right */}
+              <div className="relative">
+                <button
+                  onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 active:bg-slate-100"
+                >
+                  <span>{userLoading ? "..." : username}</span>
+                  <ChevronDown className={`h-4 w-4 transition-transform ${isUserMenuOpen ? "rotate-180" : ""}`} />
+                </button>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 20 }}>
-        {lists.map((list) => {
-          const total = list.totalItems ?? 0;
-          const checked = list.checkedItems ?? 0;
-          const percent = total > 0 ? Math.round((checked / total) * 100) : 0;
-          const ownerEmail = list.creatorEmail
-            ? (user && list.creatorEmail === user.email ? "You" : list.creatorEmail)
-            : "-";
-
-          return (
-            <div
-              role="button"
-              onClick={() => navigate(`/list/${list.listId}`, { state: { title: list.title } })}
-              key={list.listId}
-              style={{
-                background: "white",
-                padding: 20,
-                borderRadius: 14,
-                boxShadow: "0 10px 30px rgba(2,6,23,0.06)",
-                cursor: "pointer",
-                transition: "transform 160ms ease, box-shadow 160ms ease",
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                minHeight: 180
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLElement).style.transform = "translateY(-6px)";
-                (e.currentTarget as HTMLElement).style.boxShadow = "0 16px 40px rgba(2,6,23,0.08)";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLElement).style.transform = "translateY(0px)";
-                (e.currentTarget as HTMLElement).style.boxShadow = "0 10px 30px rgba(2,6,23,0.06)";
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                <div>
-                  <div style={{ display: 'inline-block', background: '#ecfdf5', color: '#065f46', padding: '6px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600, marginBottom: 10 }}>Owned</div>
-                  <h3 style={{ margin: '6px 0 8px 0', fontSize: 20, color: '#0f172a' }}>{list.title}</h3>
-                  <div style={{ color: '#475569', fontSize: 14 }}>{list.description ?? 'No description'}</div>
-                </div>
-
-                <div style={{ color: '#94a3b8', fontSize: 12 }}>{/* placeholder for time */}</div>
-              </div>
-
-              <div style={{ marginTop: 18 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <div style={{ fontSize: 13, color: '#0f172a', fontWeight: 600 }}>{checked}/{total}</div>
-                  <div style={{ fontSize: 13, color: '#94a3b8' }}>{percent}%</div>
-                </div>
-
-                <div style={{ height: 10, background: '#f1f5f9', borderRadius: 8, overflow: 'hidden' }}>
-                  <div style={{ width: `${percent}%`, height: '100%', background: '#10b981' }} />
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, color: '#64748b', fontSize: 13 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ width: 18, height: 18, borderRadius: 9, background: '#eef2ff', display: 'inline-block' }} />
-                    <div>Created by {ownerEmail}</div>
+                {isUserMenuOpen && (
+                  <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-slate-200 bg-white shadow-lg">
+                    <div className="border-b border-slate-200 px-3 py-2">
+                      <p className="text-xs font-medium text-slate-500">Logged in as</p>
+                      <p className="text-sm font-semibold text-slate-900">{currentUser?.email}</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        localStorage.removeItem("authToken");
+                        navigate("/login");
+                      }}
+                      className="w-full px-3 py-2 text-left text-sm text-red-600 transition-colors hover:bg-red-50 active:bg-red-100 inline-flex items-center gap-2"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      Logout
+                    </button>
                   </div>
-                  <div />
-                </div>
+                )}
               </div>
-            </div>
-          );
-        })}
-      </div>
 
-      {showCreateModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "white", width: "90%", maxWidth: 600, borderRadius: 8, padding: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <h3 style={{ margin: 0 }}>Create New List</h3>
-              <button onClick={() => setShowCreateModal(false)}>Close</button>
-            </div>
-
-            <div style={{ display: "grid", gap: 8 }}>
-              <label>
-                <div style={{ fontSize: 12, color: '#444' }}>Title *</div>
-                <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} style={{ width: '100%', padding: 8 }} />
-              </label>
-
-              <label>
-                <div style={{ fontSize: 12, color: '#444' }}>Description</div>
-                <textarea value={newDescription} onChange={(e) => setNewDescription(e.target.value)} style={{ width: '100%', padding: 8 }} />
-              </label>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                <button onClick={() => setShowCreateModal(false)} disabled={creating}>Cancel</button>
-                <button onClick={createList} disabled={creating}>{creating ? 'Creating...' : 'Create'}</button>
+              <div className="flex gap-3">
+                <Button
+                  onClick={() => navigate("/items")}
+                  className="bg-amber-500 font-semibold text-white hover:bg-amber-600"
+                >
+                  View Items Catalog
+                </Button>
+                <Button
+                  onClick={() => setIsCreateOpen(true)}
+                  className="bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
+                >
+                  Create New List
+                </Button>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        </header>
+
+        <section className="space-y-8">
+          {deleteError ? <p className="text-sm text-red-600">{deleteError}</p> : null}
+
+          {listsLoading ? (
+            <Card>
+              <CardContent className="py-8 text-center text-sm text-slate-500">Loading lists...</CardContent>
+            </Card>
+          ) : (
+            <>
+              <div className="space-y-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h2 className="text-xl font-semibold text-slate-900">My Lists</h2>
+                    <p className="mt-1 text-sm text-slate-500">Lists you own and can fully manage.</p>
+                  </div>
+                </div>
+                <ItemList
+                  lists={ownedLists}
+                  emptyTitle="No lists created yet"
+                  emptyDescription="Create your first list to start organizing your shopping items."
+                  onOpen={(listId) => navigate(`/lists/${listId}`)}
+                />
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-xl font-semibold text-slate-900">Shared With Me</h2>
+                  <p className="mt-1 text-sm text-slate-500">Lists other collaborators shared with your account.</p>
+                </div>
+                <ItemList
+                  lists={sharedLists}
+                  emptyTitle="No shared lists yet"
+                  emptyDescription="When someone shares a list with you, it will appear here."
+                  onOpen={(listId) => navigate(`/lists/${listId}`)}
+                />
+              </div>
+            </>
+          )}
+        </section>
+      </div>
+
+      <Dialog open={isCreateOpen} onOpenChange={handleCreateDialogChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create List</DialogTitle>
+            <DialogDescription>Add a title and optional description for your new list.</DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCreateList();
+            }}
+          >
+            <Input
+              placeholder="List title"
+              value={createTitle}
+              onChange={(event) => setCreateTitle(event.target.value)}
+              disabled={createLoading}
+            />
+            <Input
+              placeholder="Description (optional)"
+              value={createDescription}
+              onChange={(event) => setCreateDescription(event.target.value)}
+              disabled={createLoading}
+            />
+            {createError ? <p className="text-sm text-red-600">{createError}</p> : null}
+            <DialogFooter>
+              <Button
+                type="submit"
+                disabled={createLoading || !canCreateList}
+                className="min-w-32 bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
+              >
+                {createLoading ? "Creating..." : "Create List"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(editingList)} onOpenChange={(open) => !open && setEditingList(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit List</DialogTitle>
+            <DialogDescription>Update list title or description.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <Input
+              placeholder="Title"
+              value={editTitle}
+              onChange={(event) => setEditTitle(event.target.value)}
+              disabled={updateLoading}
+            />
+            <Input
+              placeholder="Description"
+              value={editDescription}
+              onChange={(event) => setEditDescription(event.target.value)}
+              disabled={updateLoading}
+            />
+            {updateError ? <p className="text-sm text-red-600">{updateError}</p> : null}
+          </div>
+
+          <DialogFooter>
+            <Button
+              onClick={handleUpdateList}
+              disabled={updateLoading || !canUpdateList}
+              className="min-w-32 bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
+            >
+              {updateLoading ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
-
-// Create List Modal markup is rendered conditionally inside the component

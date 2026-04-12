@@ -1,280 +1,262 @@
-import { useEffect, useState } from "react";
-import { apiFetch } from "../lib/api";
-
-interface ItemDTO {
-  id: number;
-  name: string;
-  category: string;
-  imageUrl?: string | null;
-  creatorId?: number | null;
-}
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { ArrowLeft, Box, Pencil, Plus, Search, Sparkles, Trash2 } from "lucide-react";
+import axios from "axios";
+import { getAllItems, deleteItem } from "../api/item";
+import { getCurrentUser } from "../api/user";
+import type { Item } from "../types/item";
+import type { CurrentUser } from "../types/user";
+import CreateItemCard from "../components/CreateItemCard";
+import UpdateItemCard from "../components/UpdateItemCard";
+import { Button } from "../components/ui/button";
+import { Card, CardContent } from "../components/ui/card";
 
 export default function ItemsPage() {
-  const [items, setItems] = useState<ItemDTO[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newCategory, setNewCategory] = useState<string>("VEGETABLES");
-  const [newImageUrl, setNewImageUrl] = useState<string>("");
-  const [adding, setAdding] = useState(false);
-  const [me, setMe] = useState<{ id?: number; email?: string } | null>(null);
-  const [rowLoading, setRowLoading] = useState<Record<number, boolean>>({});
-  const [editingItem, setEditingItem] = useState<ItemDTO | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editCategory, setEditCategory] = useState<string>("VEGETABLES");
-  const [editImageUrl, setEditImageUrl] = useState<string>("");
-  const [savingEdit, setSavingEdit] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [deleteLoadingId, setDeleteLoadingId] = useState<number | null>(null);
+
+  const fetchItems = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await getAllItems();
+      setItems(response);
+    } catch (fetchError) {
+      console.error("Failed to fetch items:", fetchError);
+      setError("Failed to load items.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    let mounted = true;
-    const controller = new AbortController();
-    async function fetchItems() {
-      setLoading(true);
+    fetchItems();
+  }, []);
+
+  useEffect(() => {
+    async function fetchCurrentUserProfile() {
       try {
-        const [resp, meResp] = await Promise.all([
-          apiFetch<ItemDTO[]>('/item?global=true', { signal: controller.signal }),
-          apiFetch<{ id?: number; email?: string }>('/user/me', { signal: controller.signal }).catch(() => null),
-        ]);
-        if (!mounted) return;
-        setItems((resp as ItemDTO[] )|| []);
-        setMe(meResp || null);
-        setError(null);
-      } catch (err: any) {
-        if (err && (err.name === 'AbortError' || err.message?.includes('The user aborted a request'))) {
-          return;
-        }
-        console.error("[ItemsPage] failed to load items:", err);
-        if (!mounted) return;
-        setError(err.message || "Failed to load items");
-      } finally {
-        if (mounted) setLoading(false);
+        const user = await getCurrentUser();
+        setCurrentUser(user);
+      } catch (fetchError) {
+        console.error("Failed to fetch current user:", fetchError);
       }
     }
 
-    fetchItems();
-    return () => { mounted = false; controller.abort(); };
+    void fetchCurrentUserProfile();
   }, []);
 
-  if (loading) return <p>Loading items...</p>;
-  if (error) return <p style={{ color: 'red' }}>{error}</p>;
+  const handleItemCreated = () => {
+    setShowCreateModal(false);
+    void fetchItems();
+  };
 
-  const globalItems = items.filter(i => i.creatorId == null);
-  const customItems = items.filter(i => i.creatorId != null);
+  const handleDeleteItem = async (itemId: number) => {
+    const confirmed = window.confirm("Delete this custom item? This action cannot be undone.");
+    if (!confirmed) return;
+
+    try {
+      setDeleteLoadingId(itemId);
+      setError(null);
+      await deleteItem(itemId);
+      await fetchItems();
+    } catch (err) {
+      console.error("Failed to delete item:", err);
+
+      if (axios.isAxiosError(err)) {
+        const responseData = err.response?.data;
+
+        if (typeof responseData === "string") {
+          setError(responseData);
+        } else if (
+          responseData &&
+          typeof responseData === "object" &&
+          "message" in responseData &&
+          typeof responseData.message === "string"
+        ) {
+          setError(responseData.message);
+        } else {
+          setError(err.message || "Failed to delete item.");
+        }
+      } else if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Failed to delete item.");
+      }
+    } finally {
+      setDeleteLoadingId(null);
+    }
+  };
+
+  const filteredItems = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    if (!normalizedQuery) return items;
+
+    return items.filter((item) => {
+      const searchable = `${item.name} ${item.category}`.toLowerCase();
+      return searchable.includes(normalizedQuery);
+    });
+  }, [items, searchQuery]);
+
+  const globalItems = useMemo(
+    () => filteredItems.filter((item) => item.creatorId === null),
+    [filteredItems],
+  );
+
+  const customItems = useMemo(
+    () => filteredItems.filter((item) => item.creatorId !== null),
+    [filteredItems],
+  );
+
+  const canManageItem = (item: Item) => currentUser !== null && item.creatorId === currentUser.id;
 
   return (
-    <div style={{ padding: 24, maxWidth: 1000, margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2 style={{ marginTop: 0 }}>Available Items</h2>
-        <div>
-          <button onClick={() => setShowAddModal(true)} style={{ background: '#10b981', color: 'white', border: 'none', padding: '8px 12px', borderRadius: 8, cursor: 'pointer' }}>+ New Item</button>
+    <div className="min-h-screen bg-slate-50/80">
+      <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
+        <Link
+          to="/dashboard"
+          className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition-colors duration-200 hover:text-slate-700"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to lists
+        </Link>
+
+        <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Items Catalog</h1>
+            <p className="mt-2 text-sm text-slate-500">Browse global and custom items across your lists</p>
+          </div>
+
+          <Button
+            onClick={() => setShowCreateModal(true)}
+            className="bg-emerald-600 font-semibold text-white transition-all duration-200 hover:bg-emerald-700 hover:shadow-sm active:scale-[0.99]"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Add Custom Item
+          </Button>
         </div>
+
+        <div className="mt-6">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search item"
+              className="h-14 w-full rounded-2xl border border-emerald-500/70 bg-white pl-12 pr-4 text-base text-slate-900 shadow-sm outline-none ring-4 ring-emerald-500/10 transition-all focus-visible:ring-4 focus-visible:ring-emerald-500/20"
+            />
+          </div>
+        </div>
+
+        {loading ? <p className="mt-6 text-sm text-slate-500">Loading items...</p> : null}
+        {error ? <p className="mt-6 text-sm text-red-600">{error}</p> : null}
+
+        {!loading && !error ? (
+          filteredItems.length === 0 ? (
+            <Card className="mt-6 rounded-xl border border-slate-200 shadow-sm">
+              <CardContent className="py-8 text-center text-sm text-slate-500">
+                {items.length === 0 ? "No items found." : "No items match your search."}
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="mt-8 space-y-10">
+              <section className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <Box className="h-5 w-5 text-emerald-600" />
+                  <h2 className="text-xl font-semibold tracking-tight text-slate-900">Global Items</h2>
+                  <span className="text-sm text-slate-500">({globalItems.length})</span>
+                </div>
+
+                {globalItems.length === 0 ? (
+                  <p className="text-sm text-slate-500">No global items found.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-3">
+                    {globalItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="inline-flex items-center rounded-full bg-emerald-50 px-5 py-3 text-base font-medium text-emerald-700"
+                      >
+                        {item.name}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <Sparkles className="h-5 w-5 text-amber-500" />
+                  <h2 className="text-xl font-semibold tracking-tight text-slate-900">Custom Items</h2>
+                  <span className="text-sm text-slate-500">({customItems.length})</span>
+                </div>
+
+                {customItems.length === 0 ? (
+                  <p className="text-sm text-slate-500">No custom items found.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-3">
+                    {customItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-4 py-2.5 text-base font-medium text-amber-700 transition-all duration-200 hover:shadow-sm"
+                      >
+                        <span>{item.name}</span>
+                        {canManageItem(item) ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setEditingItem(item)}
+                              className="rounded-full p-1 text-amber-600 transition-colors hover:bg-amber-100 hover:text-amber-800"
+                              aria-label={`Edit ${item.name}`}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteItem(item.id)}
+                              disabled={deleteLoadingId === item.id}
+                              className="rounded-full p-1 text-amber-600 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                              aria-label={`Delete ${item.name}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          )
+        ) : null}
+
       </div>
 
-      <section style={{ marginTop: 18 }}>
-        <h3 style={{ marginBottom: 8 }}>Global items</h3>
-        {globalItems.length === 0 ? <p style={{ color: '#64748b' }}>No global items found.</p> : (
-          <div style={{ display: 'grid', gap: 10 }}>
-            {globalItems.map(it => (
-              <div key={it.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, background: 'white', borderRadius: 10, boxShadow: '0 6px 18px rgba(2,6,23,0.04)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 44, height: 44, borderRadius: 8, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {it.imageUrl ? <img src={it.imageUrl} alt={it.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} /> : <div style={{ fontSize: 18, color: '#94a3b8' }}>🍎</div>}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 16, color: '#0f172a' }}>{it.name}</div>
-                    <div style={{ color: '#64748b', fontSize: 13 }}>{it.category}</div>
-                  </div>
-                </div>
+      {showCreateModal ? (
+        <CreateItemCard
+          onCreated={handleItemCreated}
+          onCancel={() => setShowCreateModal(false)}
+        />
+      ) : null}
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ background: '#ecf2ff', color: '#0f172a', padding: '6px 10px', borderRadius: 999, fontSize: 12 }}>Global</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+      {editingItem ? (
+        <UpdateItemCard
+          item={editingItem}
+          onUpdated={() => {
+            setEditingItem(null);
+            void fetchItems();
+          }}
+          onCancel={() => setEditingItem(null)}
+        />
+      ) : null}
 
-      <section style={{ marginTop: 28 }}>
-        <h3 style={{ marginBottom: 8 }}>Your custom items</h3>
-        {customItems.length === 0 ? <p style={{ color: '#64748b' }}>You don't have any custom items yet.</p> : (
-          <div style={{ display: 'grid', gap: 10 }}>
-            {customItems.map(it => (
-              <div key={it.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, background: 'white', borderRadius: 10, boxShadow: '0 6px 18px rgba(2,6,23,0.04)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 44, height: 44, borderRadius: 8, background: '#fff7ed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {it.imageUrl ? <img src={it.imageUrl} alt={it.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} /> : <div style={{ fontSize: 18, color: '#f59e0b' }}>★</div>}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 16, color: '#0f172a' }}>{it.name}</div>
-                    <div style={{ color: '#64748b', fontSize: 13 }}>{it.category}</div>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ background: '#fff7ed', color: '#92400e', padding: '6px 10px', borderRadius: 999, fontSize: 12 }}>Custom</div>
-                  {/* Edit/Delete only for items created by current user */}
-                  {me && it.creatorId && me.id === it.creatorId && (
-                    <div style={{ display: 'flex', gap: 8, marginLeft: 8 }}>
-                      <button onClick={() => {
-                        setEditingItem(it);
-                        setEditName(it.name);
-                        setEditCategory(it.category);
-                        setEditImageUrl(it.imageUrl ?? '');
-                      }} style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid #e6eaf0', background: 'transparent', cursor: 'pointer' }}>Edit</button>
-
-                      <button onClick={async () => {
-                        if (!confirm('Delete this custom item?')) return;
-                        const idNum = Number(it.id);
-                        if (Number.isNaN(idNum)) {
-                          alert('Invalid item id');
-                          return;
-                        }
-                        setRowLoading(s => ({ ...s, [idNum]: true }));
-                        try {
-                          await apiFetch(`/item/${idNum}`, { method: 'DELETE' });
-                          const resp = await apiFetch<ItemDTO[]>('/item?global=true');
-                          setItems(resp || []);
-                        } catch (err: any) {
-                          console.error('[ItemsPage] failed to delete item', err);
-                          alert('Failed to delete item: ' + (err.message || 'unknown'));
-                        } finally {
-                          setRowLoading(s => ({ ...s, [idNum]: false }));
-                        }
-                      }} disabled={!!rowLoading[it.id]} style={{ padding: '6px 8px', borderRadius: 8, border: 'none', background: '#ef4444', color: 'white', cursor: 'pointer' }}>{rowLoading[it.id] ? 'Deleting...' : 'Delete'}</button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-      {showAddModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 80 }}>
-          <div style={{ background: 'white', width: '92%', maxWidth: 520, borderRadius: 8, padding: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ margin: 0 }}>Add New Item</h3>
-              <button onClick={() => setShowAddModal(false)}>Close</button>
-            </div>
-
-            <div style={{ display: 'grid', gap: 8 }}>
-              <label>
-                <div style={{ fontSize: 12, color: '#444' }}>Name *</div>
-                <input value={newName} onChange={(e) => setNewName(e.target.value)} style={{ width: '100%', padding: 8 }} />
-              </label>
-
-              <label>
-                <div style={{ fontSize: 12, color: '#444' }}>Category *</div>
-                <select value={newCategory} onChange={(e) => setNewCategory(e.target.value)} style={{ width: '100%', padding: 8 }}>
-                  <option value="VEGETABLES">VEGETABLES</option>
-                  <option value="FRUITS">FRUITS</option>
-                  <option value="DAIRY">DAIRY</option>
-                  <option value="MEAT">MEAT</option>
-                  <option value="DRINKS">DRINKS</option>
-                  <option value="CLEANING">CLEANING</option>
-                  <option value="OTHER">OTHER</option>
-                </select>
-              </label>
-
-              <label>
-                <div style={{ fontSize: 12, color: '#444' }}>Image URL (optional)</div>
-                <input value={newImageUrl} onChange={(e) => setNewImageUrl(e.target.value)} placeholder="https://..." style={{ width: '100%', padding: 8 }} />
-              </label>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                <button onClick={() => setShowAddModal(false)} disabled={adding}>Cancel</button>
-                <button onClick={async () => {
-                  // validation
-                  const allowed = ["VEGETABLES","FRUITS","DAIRY","MEAT","DRINKS","CLEANING","OTHER"];
-                  if (!newName.trim()) { alert('Name is required'); return; }
-                  if (!allowed.includes(newCategory)) { alert('Invalid category'); return; }
-                  setAdding(true);
-                  try {
-                    const body: any = { name: newName.trim(), category: newCategory };
-                    if (newImageUrl.trim()) body.imageUrl = newImageUrl.trim();
-                    await apiFetch('/item', { method: 'POST', body: JSON.stringify(body) });
-                    // refresh list
-                    const resp = await apiFetch<ItemDTO[]>('/item?global=true');
-                    setItems(resp || []);
-                    setShowAddModal(false);
-                    setNewName(''); setNewCategory('VEGETABLES'); setNewImageUrl('');
-                  } catch (err: any) {
-                    console.error('[ItemsPage] failed to add item', err);
-                    alert('Failed to add item: ' + (err.message || 'unknown'));
-                  } finally { setAdding(false); }
-                }} disabled={adding} style={{ background: '#10b981', color: 'white', border: 'none', padding: '8px 12px', borderRadius: 8 }}>{adding ? 'Adding...' : 'Add Item'}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      {editingItem && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 90 }}>
-          <div style={{ background: 'white', width: '92%', maxWidth: 520, borderRadius: 8, padding: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ margin: 0 }}>Edit Item</h3>
-              <button onClick={() => setEditingItem(null)}>Close</button>
-            </div>
-
-            <div style={{ display: 'grid', gap: 8 }}>
-              <label>
-                <div style={{ fontSize: 12, color: '#444' }}>Name</div>
-                <input value={editName} onChange={(e) => setEditName(e.target.value)} style={{ width: '100%', padding: 8 }} />
-              </label>
-
-              <label>
-                <div style={{ fontSize: 12, color: '#444' }}>Category</div>
-                <select value={editCategory} onChange={(e) => setEditCategory(e.target.value)} style={{ width: '100%', padding: 8 }}>
-                  <option value="VEGETABLES">VEGETABLES</option>
-                  <option value="FRUITS">FRUITS</option>
-                  <option value="DAIRY">DAIRY</option>
-                  <option value="MEAT">MEAT</option>
-                  <option value="DRINKS">DRINKS</option>
-                  <option value="CLEANING">CLEANING</option>
-                  <option value="OTHER">OTHER</option>
-                </select>
-              </label>
-
-              <label>
-                <div style={{ fontSize: 12, color: '#444' }}>Image URL</div>
-                <input value={editImageUrl} onChange={(e) => setEditImageUrl(e.target.value)} placeholder="https://..." style={{ width: '100%', padding: 8 }} />
-              </label>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                <button onClick={() => setEditingItem(null)} disabled={savingEdit}>Cancel</button>
-                <button onClick={async () => {
-                  if (!editingItem) return;
-                  // build patch body with only fields that changed
-                  const body: any = {};
-                  if (editName.trim() && editName.trim() !== editingItem.name) body.name = editName.trim();
-                  if (editCategory && editCategory !== editingItem.category) body.category = editCategory;
-                  if ((editImageUrl || '') !== (editingItem.imageUrl || '')) body.imageUrl = editImageUrl || null;
-                  if (Object.keys(body).length === 0) { setEditingItem(null); return; }
-                  const idNum = Number(editingItem.id);
-                  if (Number.isNaN(idNum)) { alert('Invalid item id'); return; }
-                  setSavingEdit(true);
-                  setRowLoading(s => ({ ...s, [idNum]: true }));
-                  try {
-                    await apiFetch(`/item/${idNum}`, { method: 'PATCH', body: JSON.stringify(body) });
-                    const resp = await apiFetch<ItemDTO[]>('/item?global=true');
-                    setItems(resp || []);
-                    setEditingItem(null);
-                  } catch (err: any) {
-                    console.error('[ItemsPage] failed to save item edit', err);
-                    alert('Failed to save item: ' + (err.message || 'unknown'));
-                  } finally {
-                    setSavingEdit(false);
-                    setRowLoading(s => ({ ...s, [idNum]: false }));
-                  }
-                }} disabled={savingEdit} style={{ background: '#10b981', color: 'white', border: 'none', padding: '8px 12px', borderRadius: 8 }}>{savingEdit ? 'Saving...' : 'Save'}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
-

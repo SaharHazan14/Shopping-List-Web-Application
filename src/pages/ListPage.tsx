@@ -1,509 +1,587 @@
-import { useEffect, useState } from "react";
-import { useParams, useLocation, useNavigate } from "react-router-dom";
-import { apiFetch } from "../lib/api";
-
-interface ListItemResponseDTO {
-  listId: number;
-  itemId: number;
-  itemName?: string;
-  quantity: number;
-  isChecked: boolean;
-}
-
-interface ListDetails {
-  listId: number;
-  title: string;
-  description?: string | null;
-  creatorEmail?: string | null;
-  creatorId?: number | null;
-  totalItems?: number;
-  checkedItems?: number;
-}
-
-interface ListMember {
-  listId: number;
-  memberId: number;
-  role: string; // Role enum from backend
-  email: string;
-}
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import axios from "axios";
+import { Check, ChevronLeft, Minus, PencilLine, Plus, Trash2, User, Users } from "lucide-react";
+import {
+  deleteList,
+  deleteListItem,
+  getListById,
+  getListItems,
+  getListMembers,
+  updateListDetails,
+  updateListItem,
+} from "../api/list";
+import { getCurrentUser } from "../api/user";
+import type { ListDetails, ListItem, ListMember } from "../types/list";
+import type { CurrentUser } from "../types/user";
+import AddItemToListModal from "../components/AddItemToListModal";
+import ManageCollaboratorsDialog from "../components/ManageCollaboratorsDialog";
+import { Button } from "../components/ui/button";
+import { Card, CardContent } from "../components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { Input } from "../components/ui/input";
 
 export default function ListPage() {
-  const { listId } = useParams<{ listId: string }>();
-  const location = useLocation();
   const navigate = useNavigate();
-  const [items, setItems] = useState<ListItemResponseDTO[]>([]);
+  const { listId } = useParams<{ listId: string }>();
+  const [list, setList] = useState<ListDetails | null>(null);
+  const [listItems, setListItems] = useState<ListItem[]>([]);
+  const [listMembers, setListMembers] = useState<ListMember[]>([]);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [itemsLoading, setItemsLoading] = useState(true);
+  const [membersLoading, setMembersLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [rowLoading, setRowLoading] = useState<Record<number, boolean>>({});
-
-  const [details, setDetails] = useState<ListDetails | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userId, setUserId] = useState<number | null>(null);
-  const [members, setMembers] = useState<ListMember[]>([]);
-  const [showMembersPanel, setShowMembersPanel] = useState(false);
-  const [updatingMember, setUpdatingMember] = useState<Record<number, boolean>>({});
-  const [deletingMember, setDeletingMember] = useState<Record<number, boolean>>({});
-
-  // close modal on Escape
-  useEffect(() => {
-    if (!showMembersPanel) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setShowMembersPanel(false);
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [showMembersPanel]);
-  const [editing, setEditing] = useState(false);
+  const [itemsError, setItemsError] = useState<string | null>(null);
+  const [membersError, setMembersError] = useState<string | null>(null);
+  const [showAddItemModal, setShowAddItemModal] = useState(false);
+  const [showCollaboratorsDialog, setShowCollaboratorsDialog] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
-  const [showAddItemModal, setShowAddItemModal] = useState(false);
-  const [availableItems, setAvailableItems] = useState<any[]>([]);
-  const [loadingAvailableItems, setLoadingAvailableItems] = useState(false);
-  const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
-  const [newQuantity, setNewQuantity] = useState<number>(1);
-  const [newChecked, setNewChecked] = useState<boolean>(false);
-  const [addingItem, setAddingItem] = useState(false);
+  const [updateLoading, setUpdateLoading] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [deleteListLoading, setDeleteListLoading] = useState(false);
+  const [itemActionLoadingId, setItemActionLoadingId] = useState<number | null>(null);
+
+  const parsedListId = useMemo(() => {
+    if (!listId) return null;
+    const value = Number(listId);
+    return Number.isFinite(value) ? value : null;
+  }, [listId]);
 
   useEffect(() => {
-    let mounted = true;
-    const controller = new AbortController();
-    async function fetchAll() {
-      if (!listId) {
-        setError("Missing list id");
+    async function fetchCurrentUserProfile() {
+      try {
+        const profile = await getCurrentUser();
+        setCurrentUser(profile);
+      } catch (fetchError) {
+        console.error("Failed to fetch current user:", fetchError);
+      }
+    }
+
+    fetchCurrentUserProfile();
+  }, []);
+
+  useEffect(() => {
+    async function fetchListDetails() {
+      if (parsedListId === null) {
+        setError("Invalid list id");
         setLoading(false);
         return;
       }
 
       try {
-        const [respItems, respDetails, me, respMembers] = await Promise.all([
-          apiFetch<ListItemResponseDTO[]>(`/list/${listId}/item`, { signal: controller.signal }),
-          apiFetch<ListDetails>(`/list/${listId}`, { signal: controller.signal }),
-          apiFetch<{ id?: number; email?: string }>("/user/me", { signal: controller.signal }).catch(() => null),
-          apiFetch<ListMember[]>(`/list/${listId}/member`, { signal: controller.signal }).catch(() => []),
-        ]);
-
-        if (!mounted) return;
-        setItems(respItems || []);
-        // normalize creator email / id: backend may return `creatorEmail`, nested `creator.email`, or `creatorId`
-        if (respDetails) {
-          const anyDetails: any = respDetails as any;
-          const normalizedCreatorEmail = respDetails.creatorEmail ?? anyDetails.creator?.email ?? anyDetails.creator_email ?? null;
-          const normalizedCreatorId = (respDetails as any).creatorId ?? anyDetails.creator?.id ?? anyDetails.creator_id ?? null;
-          const normalized = { ...respDetails, creatorEmail: normalizedCreatorEmail, creatorId: normalizedCreatorId } as ListDetails;
-          setDetails(normalized);
-        } else {
-          setDetails(null);
-        }
-        setUserEmail(me?.email ?? null);
-        setUserId(me?.id ?? null);
-        // logs: print the raw responses so we can inspect ListDetails & members shape
-        console.info('[ListPage] respItems:', respItems);
-        console.info('[ListPage] respDetails:', respDetails);
-        console.info('[ListPage] /user/me:', me);
-        console.info('[ListPage] respMembers:', respMembers);
-        setEditTitle(respDetails?.title ?? ((location.state as any)?.title ?? `List ${listId}`));
-        setEditDescription(respDetails?.description ?? "");
-        setMembers(respMembers || []);
-      } catch (err: any) {
-        // Ignore aborts triggered by StrictMode remounts / cleanup
-        if (err && (err.name === 'AbortError' || err.message?.includes('The user aborted a request'))) {
-          return;
-        }
-        console.error("[ListPage] failed to load:", err);
-        if (!mounted) return;
-        setError(err.message || "Failed to load list");
+        setLoading(true);
+        setError(null);
+        const response = await getListById(parsedListId);
+        setList(response);
+      } catch (fetchError) {
+        console.error("Failed to fetch list details:", fetchError);
+        setError("Failed to load list details.");
       } finally {
-        if (mounted) setLoading(false);
+        setLoading(false);
       }
     }
 
-    fetchAll();
-    return () => {
-      mounted = false;
-      controller.abort();
-    };
-  }, [listId]);
+    fetchListDetails();
+  }, [parsedListId]);
 
-  // PATCH single item: quantity, isChecked
-  async function patchItem(itemId: number, patch: { quantity?: number; isChecked?: boolean }) {
-    if (!listId) return;
-    setRowLoading((s) => ({ ...s, [itemId]: true }));
-    try {
-      await apiFetch(`/list/${listId}/item/${itemId}`, {
-        method: "PATCH",
-        body: JSON.stringify(patch),
-      });
-
-      setItems((prev) => prev.map((it) => (it.itemId === itemId ? { ...it, quantity: patch.quantity ?? it.quantity, isChecked: patch.isChecked ?? it.isChecked } : it)));
-    } catch (err: any) {
-      console.error("[ListPage] failed to patch item:", err);
-      alert("Failed to update item: " + (err.message || "unknown"));
-    } finally {
-      setRowLoading((s) => ({ ...s, [itemId]: false }));
-    }
-  }
-
-  async function deleteItem(itemId: number) {
-    if (!listId) return;
-    const confirmed = window.confirm("Remove this item from the list?");
-    if (!confirmed) return;
-    setRowLoading((s) => ({ ...s, [itemId]: true }));
-    try {
-      await apiFetch(`/list/${listId}/item/${itemId}`, { method: "DELETE" });
-      setItems((prev) => prev.filter((it) => it.itemId !== itemId));
-    } catch (err: any) {
-      console.error("[ListPage] failed to delete item:", err);
-      alert("Failed to delete item: " + (err.message || "unknown"));
-    } finally {
-      setRowLoading((s) => ({ ...s, [itemId]: false }));
-    }
-  }
-
-  async function saveDetails() {
-    if (!listId) return;
-    const titleTrim = editTitle?.trim();
-    const descTrim = editDescription?.trim();
-    // require at least one provided
-    if (!titleTrim && !descTrim) {
-      alert("Please provide a title or description to update the list.");
+  const fetchItems = async () => {
+    if (parsedListId === null) {
+      setItemsError("Invalid list id");
+      setItemsLoading(false);
       return;
     }
 
-    const payload: Record<string, string> = {};
-    if (titleTrim) payload.title = titleTrim;
-    if (descTrim) payload.description = descTrim;
+    try {
+      setItemsLoading(true);
+      setItemsError(null);
+      const response = await getListItems(parsedListId);
+      setListItems(response);
+    } catch (fetchError) {
+      console.error("Failed to fetch list items:", fetchError);
+      setItemsError("Failed to load list items.");
+    } finally {
+      setItemsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchItems();
+  }, [parsedListId]);
+
+  const fetchMembers = async () => {
+    if (parsedListId === null) {
+      setMembersError("Invalid list id");
+      setMembersLoading(false);
+      return;
+    }
 
     try {
-      await apiFetch(`/list/${listId}`, { method: "PATCH", body: JSON.stringify(payload) });
-      setDetails((d) => (d ? { ...d, title: payload.title ?? d.title, description: payload.description ?? d.description } : d));
-      setEditing(false);
-    } catch (err: any) {
-      console.error("[ListPage] failed to save details:", err);
-      alert("Failed to save list details: " + (err.message || "unknown"));
+      setMembersLoading(true);
+      setMembersError(null);
+      const response = await getListMembers(parsedListId);
+      setListMembers(response);
+    } catch (fetchError) {
+      console.error("Failed to fetch list members:", fetchError);
+      setMembersError("Failed to load list members.");
+    } finally {
+      setMembersLoading(false);
     }
-  }
+  };
 
-  async function deleteList() {
-    if (!listId) return;
-    const confirmed = window.confirm("Are you sure you want to delete this list? This cannot be undone.");
+  useEffect(() => {
+    fetchMembers();
+  }, [parsedListId]);
+
+  const handleDeleteItem = async (itemId: number) => {
+    if (parsedListId === null || !canModifyItems) return;
+
+    const confirmed = window.confirm("Remove this item from the list?");
     if (!confirmed) return;
+
     try {
-      await apiFetch(`/list/${listId}`, { method: "DELETE" });
-      // navigate back to dashboard/lists
-      navigate('/dashboard');
-    } catch (err: any) {
-      console.error('[ListPage] failed to delete list:', err);
-      alert('Failed to delete list: ' + (err.message || 'unknown'));
+      setItemActionLoadingId(itemId);
+      await deleteListItem(parsedListId, itemId);
+      await fetchItems();
+    } catch (err) {
+      console.error("Failed to delete item:", err);
+      setItemsError("Failed to delete item.");
+    } finally {
+      setItemActionLoadingId(null);
     }
-  }
+  };
 
-  
+  const handleAdjustQuantity = async (item: ListItem, delta: number) => {
+    if (parsedListId === null || !canModifyItems) return;
 
-  if (loading) return <p>Loading list...</p>;
-  if (error) return <p style={{ color: "red" }}>{error}</p>;
+    const nextQuantity = Math.max(1, item.quantity + delta);
+    if (nextQuantity === item.quantity) return;
 
-  const isOwner = (() => {
-    if (!details) return false;
-    // primary check: numeric creatorId match
-    if (details.creatorId != null && userId != null) {
-      try {
-        if (Number(details.creatorId) === Number(userId)) return true;
-      } catch (e) {
-        // ignore and fall back to email
+    try {
+      setItemActionLoadingId(item.itemId);
+      await updateListItem(parsedListId, item.itemId, { quantity: nextQuantity });
+      await fetchItems();
+    } catch (err) {
+      console.error("Failed to update item quantity:", err);
+      setItemsError("Failed to update item quantity.");
+    } finally {
+      setItemActionLoadingId(null);
+    }
+  };
+
+  const handleToggleChecked = async (item: ListItem) => {
+    if (parsedListId === null || !canModifyItems) return;
+
+    try {
+      setItemActionLoadingId(item.itemId);
+      await updateListItem(parsedListId, item.itemId, { isChecked: !item.isChecked });
+      await fetchItems();
+    } catch (err) {
+      console.error("Failed to update item status:", err);
+      setItemsError("Failed to update item status.");
+    } finally {
+      setItemActionLoadingId(null);
+    }
+  };
+
+  const owner = useMemo(
+    () => listMembers.find((member) => member.role === "OWNER") ?? null,
+    [listMembers],
+  );
+  const currentMembership = useMemo(() => {
+    if (!currentUser) return null;
+    return listMembers.find((member) => member.memberId === currentUser.id) ?? null;
+  }, [currentUser, listMembers]);
+  const canManageCollaborators = currentUser !== null && list !== null && currentUser.id === list.creatorId;
+  const canManageList = canManageCollaborators;
+  const canModifyItems = canManageList || currentMembership?.role === "EDITOR";
+
+  const creatorEmail = owner?.email ?? `creator-${list?.creatorId ?? "unknown"}@unknown`;
+
+  const totalItems = listItems.length;
+  const uncheckedItems = useMemo(
+    () => listItems.filter((item) => !item.isChecked),
+    [listItems],
+  );
+  const checkedItems = useMemo(
+    () => listItems.filter((item) => item.isChecked),
+    [listItems],
+  );
+  const checkedCount = checkedItems.length;
+  const progress = totalItems > 0 ? Math.round((checkedCount / totalItems) * 100) : 0;
+  const canUpdateList = editTitle.trim().length >= 2;
+
+  const openEditDialog = () => {
+    if (!list) return;
+
+    setEditTitle(list.title);
+    setEditDescription(list.description ?? "");
+    setUpdateError(null);
+    setIsEditDialogOpen(true);
+  };
+
+  const handleUpdateList = async () => {
+    if (parsedListId === null || !list) return;
+
+    const trimmedTitle = editTitle.trim();
+    const trimmedDescription = editDescription.trim();
+    const payload: { title?: string; description?: string } = {};
+
+    if (trimmedTitle.length < 2) {
+      setUpdateError("Title must be at least 2 characters.");
+      return;
+    }
+
+    if (trimmedTitle !== list.title) {
+      payload.title = trimmedTitle;
+    }
+
+    if (trimmedDescription !== (list.description ?? "")) {
+      payload.description = trimmedDescription;
+    }
+
+    if (!payload.title && payload.description === undefined) {
+      setUpdateError("Make a change before saving.");
+      return;
+    }
+
+    try {
+      setUpdateLoading(true);
+      setUpdateError(null);
+      await updateListDetails(parsedListId, payload);
+      setIsEditDialogOpen(false);
+
+      const refreshed = await getListById(parsedListId);
+      setList(refreshed);
+    } catch (error) {
+      console.error("Failed to update list:", error);
+
+      if (axios.isAxiosError(error)) {
+        const responseData = error.response?.data;
+
+        if (typeof responseData === "string") {
+          setUpdateError(responseData);
+        } else if (
+          responseData &&
+          typeof responseData === "object" &&
+          "message" in responseData &&
+          typeof responseData.message === "string"
+        ) {
+          setUpdateError(responseData.message);
+        } else {
+          setUpdateError(error.message || "Failed to update list.");
+        }
+      } else if (error instanceof Error) {
+        setUpdateError(error.message);
+      } else {
+        setUpdateError("Failed to update list.");
       }
+    } finally {
+      setUpdateLoading(false);
     }
-    // fallback: email comparison (trim & lowercase)
-    if (details.creatorEmail && userEmail) {
-      if (details.creatorEmail.trim().toLowerCase() === userEmail.trim().toLowerCase()) return true;
-    }
-    return false;
-  })();
+  };
 
-  const title = details?.title ?? (location.state as any)?.title ?? `List ${listId}`;
-  const description = details?.description ?? "";
-  const total = details?.totalItems ?? items.length;
-  const checked = details?.checkedItems ?? items.filter((i) => i.isChecked).length;
-  const percent = total > 0 ? Math.round((checked / total) * 100) : 0;
+  const handleDeleteList = async () => {
+    if (parsedListId === null || !list) return;
+
+    const confirmed = window.confirm(`Delete list "${list.title}"? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      setDeleteListLoading(true);
+      await deleteList(parsedListId);
+      navigate("/dashboard", { replace: true });
+    } catch (error) {
+      console.error("Failed to delete list:", error);
+      setError("Failed to delete list.");
+    } finally {
+      setDeleteListLoading(false);
+    }
+  };
+
+  const renderItemRow = (item: ListItem) => (
+    <li
+      key={item.itemId}
+      className={`flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 shadow-sm transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md ${
+        item.isChecked
+          ? "border-emerald-200 bg-emerald-50/70"
+          : "border-slate-200 bg-white"
+      }`}
+    >
+      <button
+        type="button"
+        onClick={() => handleToggleChecked(item)}
+        disabled={itemActionLoadingId === item.itemId || !canModifyItems}
+        className={`group flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors duration-200 ease-out ${
+          canModifyItems
+            ? item.isChecked
+              ? "hover:bg-emerald-100/70"
+              : "hover:bg-slate-100"
+            : "cursor-default"
+        }`}
+      >
+        <span
+          className={`flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all duration-200 ease-out ${
+            item.isChecked
+              ? "border-emerald-500 bg-emerald-500/15"
+              : "border-slate-300 group-hover:border-slate-400"
+          }`}
+        >
+          {item.isChecked ? <Check className="h-3 w-3 text-emerald-600" /> : null}
+        </span>
+        <span
+          className={`truncate text-[15px] font-medium ${
+            item.isChecked ? "text-slate-400 line-through opacity-75" : "text-slate-900"
+          }`}
+        >
+          {item.itemName}
+        </span>
+      </button>
+
+      {canModifyItems ? (
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => handleAdjustQuantity(item, -1)}
+            disabled={itemActionLoadingId === item.itemId || item.quantity <= 1}
+            aria-label={`Decrease ${item.itemName} quantity`}
+            className="h-8 w-8 cursor-pointer rounded-full p-0 text-slate-600 transition-all duration-200 ease-out hover:bg-slate-100 hover:text-slate-900 active:scale-95"
+          >
+            <Minus className="h-4 w-4" />
+          </Button>
+          <span className="w-6 text-center text-sm font-semibold text-slate-600">{item.quantity}</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => handleAdjustQuantity(item, 1)}
+            disabled={itemActionLoadingId === item.itemId}
+            aria-label={`Increase ${item.itemName} quantity`}
+            className="h-8 w-8 cursor-pointer rounded-full p-0 text-slate-600 transition-all duration-200 ease-out hover:bg-slate-100 hover:text-slate-900 active:scale-95"
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => handleDeleteItem(item.itemId)}
+            disabled={itemActionLoadingId === item.itemId}
+            aria-label={`Delete ${item.itemName}`}
+            className="h-8 w-8 cursor-pointer rounded-full p-0 text-red-500 transition-all duration-200 ease-out hover:bg-red-50 hover:text-red-600 active:scale-95"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : (
+        <span className="text-sm font-medium text-slate-500">Qty {item.quantity}</span>
+      )}
+    </li>
+  );
 
   return (
-    <div style={{ padding: 28, maxWidth: 1000, margin: '0 auto' }}>
-      <div style={{ marginBottom: 18 }}>
-        <button onClick={() => navigate(-1)} style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer' }}>← Back to lists</button>
-      </div>
+    <div className="min-h-screen bg-slate-50/80">
+      <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
+        <Link
+          to="/dashboard"
+          className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition-colors duration-200 hover:text-slate-700"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Back to lists
+        </Link>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-            <div style={{ background: '#ecfdf5', color: '#065f46', padding: '6px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600 }}>Owned</div>
-            <div style={{ color: '#64748b', fontSize: 13 }}>{details?.creatorEmail ?? ''}</div>
+        {loading ? <p className="mt-6 text-sm text-slate-500">Loading list details...</p> : null}
+        {error ? <p className="mt-6 text-sm text-red-600">{error}</p> : null}
+
+        {!loading && !error && list ? (
+          <div className="mt-5 space-y-6">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-3">
+                <div className="inline-flex items-center gap-2 text-slate-600">
+                  <User className="h-4 w-4" />
+                  <span className="text-sm text-slate-500">{creatorEmail}</span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2 transition-all duration-200 hover:shadow-sm"
+                    onClick={() => setShowCollaboratorsDialog(true)}
+                  >
+                    <Users className="h-4 w-4" />
+                    Collaborators
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                      {membersLoading ? "..." : listMembers.length}
+                    </span>
+                  </Button>
+
+                  {canManageList ? (
+                    <>
+                      <Button type="button" variant="outline" className="gap-2" onClick={openEditDialog}>
+                        <PencilLine className="h-4 w-4" />
+                        Edit List
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        className="gap-2"
+                        onClick={() => void handleDeleteList()}
+                        disabled={deleteListLoading}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        {deleteListLoading ? "Deleting..." : "Delete List"}
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+            {membersError ? <p className="text-sm text-red-600">{membersError}</p> : null}
+
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight text-slate-900">{list.title}</h1>
+              <p className="mt-2 text-sm text-slate-500">{list.description || "No description"}</p>
+            </div>
+
+            <Card className="rounded-xl border border-slate-200 shadow-sm">
+              <CardContent className="space-y-3 py-5">
+                <div className="flex items-center justify-between text-slate-700">
+                  <span className="text-xl font-semibold text-slate-900">{checkedCount}/{totalItems} items</span>
+                  <span className="text-sm font-medium text-slate-500">{progress}% complete</span>
+                </div>
+                <div className="h-3.5 overflow-hidden rounded-full bg-slate-200/90">
+                  <div
+                    className="h-full rounded-full bg-emerald-500 transition-all duration-300 ease-out"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-slate-900">Items</h2>
+              {canModifyItems ? (
+                <Button
+                  onClick={() => setShowAddItemModal(true)}
+                  className="bg-emerald-600 transition-all duration-200 hover:bg-emerald-700 hover:shadow-sm active:scale-[0.99]"
+                >
+                  Add Item
+                </Button>
+              ) : (
+                <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-400">Viewer access</span>
+              )}
+            </div>
+
+            {itemsLoading ? <p className="text-sm text-slate-500">Loading items...</p> : null}
+            {itemsError ? <p className="text-sm text-red-600">{itemsError}</p> : null}
+
+            {!itemsLoading && !itemsError ? (
+              listItems.length === 0 ? (
+                <Card className="rounded-xl border border-slate-200 shadow-sm">
+                  <CardContent className="py-8 text-center text-sm text-slate-500">No items in this list yet.</CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      To Buy ({uncheckedItems.length})
+                    </p>
+                    {uncheckedItems.length === 0 ? (
+                      <Card className="rounded-xl border border-slate-200 shadow-sm">
+                        <CardContent className="py-4 text-sm text-slate-500">No unchecked items.</CardContent>
+                      </Card>
+                    ) : (
+                      <ul className="space-y-2.5">{uncheckedItems.map(renderItemRow)}</ul>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Completed ({checkedItems.length})
+                    </p>
+                    {checkedItems.length === 0 ? (
+                      <Card className="rounded-xl border border-emerald-200/80 bg-emerald-50/40 shadow-sm">
+                        <CardContent className="py-4 text-sm text-slate-500">No completed items yet.</CardContent>
+                      </Card>
+                    ) : (
+                      <ul className="space-y-2.5">{checkedItems.map(renderItemRow)}</ul>
+                    )}
+                  </div>
+                </div>
+              )
+            ) : null}
+          </div>
+        ) : null}
+
+      {showAddItemModal && parsedListId !== null ? (
+        <AddItemToListModal
+          listId={parsedListId}
+          onItemAdded={() => {
+            setShowAddItemModal(false);
+            fetchItems();
+          }}
+          onCancel={() => setShowAddItemModal(false)}
+        />
+      ) : null}
+
+      {showCollaboratorsDialog && parsedListId !== null && list ? (
+        <ManageCollaboratorsDialog
+          open={showCollaboratorsDialog}
+          listId={parsedListId}
+          listTitle={list.title}
+          members={listMembers}
+          canManage={canManageCollaborators}
+          onOpenChange={setShowCollaboratorsDialog}
+          onMembersChanged={() => {
+            void fetchMembers();
+          }}
+        />
+      ) : null}
+
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit List</DialogTitle>
+            <DialogDescription>Update list title or description.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <Input
+              placeholder="Title"
+              value={editTitle}
+              onChange={(event) => setEditTitle(event.target.value)}
+              disabled={updateLoading}
+            />
+            <Input
+              placeholder="Description"
+              value={editDescription}
+              onChange={(event) => setEditDescription(event.target.value)}
+              disabled={updateLoading}
+            />
+            {updateError ? <p className="text-sm text-red-600">{updateError}</p> : null}
           </div>
 
-          {/* collaborators tab (opens modal) */}
-          <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button
-              onClick={() => setShowMembersPanel(true)}
-              aria-expanded={showMembersPanel}
-              style={{
-                background: '#f1f5f9',
-                border: '1px solid #e6eef6',
-                padding: '8px 12px',
-                borderRadius: 999,
-                cursor: 'pointer',
-                fontWeight: 600,
-                color: '#0f172a'
-              }}
+          <DialogFooter>
+            <Button
+              onClick={() => void handleUpdateList()}
+              disabled={updateLoading || !canUpdateList}
+              className="min-w-32 bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
             >
-              Collaborators ({members.length})
-            </button>
-          </div>
-
-          {/* Collaborators modal */}
-          {showMembersPanel && (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }} onClick={() => setShowMembersPanel(false)}>
-              <div role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} style={{ background: 'white', width: '90%', maxWidth: 520, borderRadius: 8, padding: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <h3 style={{ margin: 0 }}>Collaborators ({members.length})</h3>
-                  <button onClick={() => setShowMembersPanel(false)} aria-label="Close collaborators">Close</button>
-                </div>
-
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {members.length === 0 && <div style={{ color: '#64748b' }}>No collaborators</div>}
-                  {members.map((m) => (
-                    <div key={m.memberId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 8, borderRadius: 8, border: '1px solid #eef2ff', background: '#fff' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <div style={{ fontSize: 14, color: '#0f172a' }}>{m.email}{(userEmail && userEmail === m.email) || (userId && userId === m.memberId) ? ' (You)' : ''}</div>
-                        <div style={{ fontSize: 12, color: '#64748b' }}>{m.role}</div>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        {isOwner && !((userId && userId === m.memberId) || (userEmail && userEmail === m.email)) ? (
-                          <>
-                            <select
-                              aria-label={`Change role for ${m.email}`}
-                              value={m.role}
-                              onChange={async (e) => {
-                                const newRole = e.target.value as string;
-                                if (!listId) return;
-                                if (!confirm(`Change role of ${m.email} to ${newRole}?`)) {
-                                  // revert selection by forcing state refresh
-                                  setMembers((prev) => prev.map(pm => pm.memberId === m.memberId ? { ...pm } : pm));
-                                  return;
-                                }
-                                setUpdatingMember((s) => ({ ...s, [m.memberId]: true }));
-                                try {
-                                  await apiFetch(`/list/${listId}/member/${m.memberId}`, {
-                                    method: 'PATCH',
-                                    body: JSON.stringify({ role: newRole }),
-                                  });
-                                  setMembers((prev) => prev.map(pm => (pm.memberId === m.memberId ? { ...pm, role: newRole } : pm)));
-                                } catch (err: any) {
-                                  console.error('[ListPage] failed to change member role:', err);
-                                  alert('Failed to change role: ' + (err.message || 'unknown'));
-                                } finally {
-                                  setUpdatingMember((s) => ({ ...s, [m.memberId]: false }));
-                                }
-                              }}
-                              disabled={!!updatingMember[m.memberId] || !!deletingMember[m.memberId]}
-                            >
-                              <option value="EDITOR">EDITOR</option>
-                              <option value="VIEWER">VIEWER</option>
-                            </select>
-
-                            <button
-                              onClick={async () => {
-                                if (!listId) return;
-                                if (!confirm(`Remove collaborator ${m.email} from this list?`)) return;
-                                setDeletingMember((s) => ({ ...s, [m.memberId]: true }));
-                                try {
-                                  await apiFetch(`/list/${listId}/member/${m.memberId}`, { method: 'DELETE' });
-                                  setMembers((prev) => prev.filter(pm => pm.memberId !== m.memberId));
-                                } catch (err: any) {
-                                  console.error('[ListPage] failed to delete member:', err);
-                                  alert('Failed to remove collaborator: ' + (err.message || 'unknown'));
-                                } finally {
-                                  setDeletingMember((s) => ({ ...s, [m.memberId]: false }));
-                                }
-                              }}
-                              disabled={!!updatingMember[m.memberId] || !!deletingMember[m.memberId]}
-                              style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer' }}
-                              title={`Remove ${m.email}`}
-                            >
-                              Remove
-                            </button>
-                          </>
-                        ) : (
-                          <div style={{ fontSize: 13, color: '#0f172a' }}>{m.role}{(userEmail && userEmail === m.email) || (userId && userId === m.memberId) ? ' (You)' : ''}</div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <h1 style={{ margin: '6px 0', fontSize: 32, color: '#0f172a' }}>{title}</h1>
-          <div style={{ color: '#6b7280', marginBottom: 18 }}>{description}</div>
-
-          <div style={{ background: '#fff', borderRadius: 12, padding: 14, boxShadow: '0 8px 20px rgba(2,6,23,0.04)', maxWidth: 700 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <div style={{ fontSize: 14, color: '#0f172a', fontWeight: 600 }}>{checked}/{total} items</div>
-              <div style={{ color: '#94a3b8' }}>{percent}% complete</div>
-            </div>
-            <div style={{ height: 12, background: '#f1f5f9', borderRadius: 8, overflow: 'hidden' }}>
-              <div style={{ width: `${percent}%`, height: '100%', background: '#10b981' }} />
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
-          {isOwner && (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button title="Edit list" onClick={() => setEditing(true)} style={{ background: 'transparent', border: '1px solid #e6eaf0', padding: 8, borderRadius: 8, cursor: 'pointer' }}>✎</button>
-              <button title="Delete list" onClick={() => deleteList()} style={{ background: 'transparent', border: '1px solid rgba(239,68,68,0.12)', padding: 8, borderRadius: 8, cursor: 'pointer', color: '#ef4444' }}>🗑️</button>
-            </div>
-          )}
-          <div>
-            <button onClick={() => {
-              setShowAddItemModal(true);
-              // fetch available items when opening
-              (async () => {
-                setLoadingAvailableItems(true);
-                try {
-                  const resp = await apiFetch<any[]>('/item?global=true');
-                  setAvailableItems(resp || []);
-                } catch (err: any) {
-                  console.error('[ListPage] failed to load available items', err);
-                  setAvailableItems([]);
-                } finally {
-                  setLoadingAvailableItems(false);
-                }
-              })();
-            }} style={{ background: '#10b981', color: 'white', border: 'none', padding: '8px 12px', borderRadius: 8, cursor: 'pointer' }}>+ Add Item</button>
-          </div>
-        </div>
+              {updateLoading ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       </div>
-
-      <div style={{ marginTop: 28 }}>
-        <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 12 }}>
-          {items.map((it) => (
-            <li key={it.itemId} style={{ background: 'white', borderRadius: 12, padding: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 6px 18px rgba(2,6,23,0.04)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <input type="checkbox" checked={!!it.isChecked} onChange={(e) => { const checked = e.target.checked; setItems((prev) => prev.map(p => p.itemId===it.itemId?{...p,isChecked:checked}:p)); patchItem(it.itemId,{isChecked:checked}); }} />
-                <div>
-                  <div style={{ fontSize: 16, color: '#0f172a' }}>{it.itemName}</div>
-                  <div style={{ color: '#94a3b8', fontSize: 13 }}>Quantity: {it.quantity}</div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <input type="number" min={1} value={it.quantity} onChange={(e)=>{ const val=Math.max(1,Number(e.target.value)||1); setItems((prev)=>prev.map(p=>p.itemId===it.itemId?{...p,quantity:val}:p)); }} onBlur={(e)=>{ const val=Math.max(1,Number(e.target.value)||1); if(!rowLoading[it.itemId]) patchItem(it.itemId,{quantity:val}); }} style={{ width: 80 }} />
-                <button onClick={()=>deleteItem(it.itemId)} disabled={!!rowLoading[it.itemId]} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer' }}>Delete</button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {/* Add Item modal */}
-      {showAddItemModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={() => setShowAddItemModal(false)}>
-          <div role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} style={{ background: 'white', width: '92%', maxWidth: 720, borderRadius: 8, padding: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ margin: 0 }}>Add Item to List</h3>
-              <button onClick={() => setShowAddItemModal(false)}>Close</button>
-            </div>
-
-            <div style={{ display: 'grid', gap: 12 }}>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, color: '#64748b', marginBottom: 6 }}>Choose an item</div>
-                  {loadingAvailableItems ? <div>Loading items...</div> : (
-                    <div style={{ maxHeight: 300, overflow: 'auto', display: 'grid', gap: 8 }}>
-                      {availableItems.map(it => (
-                        <div key={it.id} onClick={() => setSelectedItemId(it.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 8, borderRadius: 8, cursor: 'pointer', background: selectedItemId === it.id ? '#f1f5f9' : 'white', border: '1px solid #eef2ff' }}>
-                          <div style={{ width: 44, height: 44, borderRadius: 8, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{it.imageUrl ? <img src={it.imageUrl} alt={it.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }} /> : <div style={{ fontSize: 18, color: '#94a3b8' }}>🍎</div>}</div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 15, color: '#0f172a' }}>{it.name}</div>
-                            <div style={{ fontSize: 12, color: '#64748b' }}>{it.category} {it.creatorId ? <span style={{ color: '#92400e' }}>(Custom)</span> : <span style={{ color: '#0f172a' }}>(Global)</span>}</div>
-                          </div>
-                          <div style={{ width: 80, textAlign: 'right' }}>{selectedItemId === it.id ? 'Selected' : ''}</div>
-                        </div>
-                      ))}
-                      {availableItems.length === 0 && <div style={{ color: '#64748b' }}>No items available.</div>}
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ width: 260 }}>
-                  <div style={{ fontSize: 13, color: '#64748b', marginBottom: 6 }}>Quantity</div>
-                  <input type="number" min={1} value={newQuantity} onChange={(e) => setNewQuantity(Math.max(1, Number(e.target.value) || 1))} style={{ width: '100%', padding: 8 }} />
-
-                  <div style={{ marginTop: 12 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <input type="checkbox" checked={newChecked} onChange={(e) => setNewChecked(e.target.checked)} />
-                      <span style={{ color: '#64748b' }}>Mark as checked</span>
-                    </label>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-                    <button onClick={() => setShowAddItemModal(false)} disabled={addingItem}>Cancel</button>
-                    <button onClick={async () => {
-                      if (!listId) return;
-                      if (!selectedItemId) { alert('Please select an item'); return; }
-                      setAddingItem(true);
-                      try {
-                        await apiFetch(`/list/${listId}/item`, { method: 'POST', body: JSON.stringify({ itemId: selectedItemId, quantity: newQuantity, isChecked: newChecked }) });
-                        // refresh items in list
-                        const refreshed = await apiFetch<ListItemResponseDTO[]>(`/list/${listId}/item`);
-                        setItems(refreshed || []);
-                        setShowAddItemModal(false);
-                        setSelectedItemId(null);
-                        setNewQuantity(1);
-                        setNewChecked(false);
-                      } catch (err: any) {
-                        console.error('[ListPage] failed to add item to list:', err);
-                        alert('Failed to add item: ' + (err.message || 'unknown'));
-                      } finally {
-                        setAddingItem(false);
-                      }
-                    }} disabled={addingItem || loadingAvailableItems} style={{ background: '#10b981', color: 'white', border: 'none', padding: '8px 12px', borderRadius: 8 }}>{addingItem ? 'Adding...' : 'Add to list'}</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit modal */}
-      {editing && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'white', width: '90%', maxWidth: 600, borderRadius: 8, padding: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ margin: 0 }}>Edit List</h3>
-              <button onClick={()=>setEditing(false)}>Close</button>
-            </div>
-
-            <div style={{ display: 'grid', gap: 8 }}>
-              <label>
-                <div style={{ fontSize: 12, color: '#444' }}>Title</div>
-                <input value={editTitle} onChange={(e)=>setEditTitle(e.target.value)} style={{ width: '100%', padding: 8 }} />
-              </label>
-
-              <label>
-                <div style={{ fontSize: 12, color: '#444' }}>Description</div>
-                <textarea value={editDescription} onChange={(e)=>setEditDescription(e.target.value)} style={{ width: '100%', padding: 8 }} />
-              </label>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                <button onClick={()=>setEditing(false)}>Cancel</button>
-                <button onClick={saveDetails}>Save</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
