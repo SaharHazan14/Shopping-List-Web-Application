@@ -9,7 +9,7 @@ export default function PrivateRoute({ children }: Props) {
   const token = localStorage.getItem("accessToken");
 
   if (!token) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/" replace />;
   }
 
   return children;

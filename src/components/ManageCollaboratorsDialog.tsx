@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
-import { ChevronDown, Eye, PenLine, UserPlus, X } from "lucide-react";
+import { UserPlus, X } from "lucide-react";
 import { addListMember, deleteListMember, updateListMember } from "../api/list";
 import { getUsers } from "../api/user";
 import type { EditableListMemberRole, ListMember } from "../types/list";

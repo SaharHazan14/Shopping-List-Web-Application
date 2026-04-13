@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { ShoppingCart, ChevronDown, LogOut } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { createList, deleteList, getCurrentUserLists, updateListDetails } from "../api/list";
+import { createList, getCurrentUserLists, updateListDetails } from "../api/list";
 import { getCurrentUser } from "../api/user";
 import type { UserList } from "../types/list";
 import type { CurrentUser } from "../types/user";
@@ -36,8 +36,6 @@ export default function Dashboard() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [updateLoading, setUpdateLoading] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
-  const [deletingListId, setDeletingListId] = useState<number | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const fetchLists = async () => {
     try {
@@ -92,23 +90,6 @@ export default function Dashboard() {
     );
   }, [currentUser?.email, lists]);
 
-  const handleDeleteList = async (listId: number, title: string) => {
-    const confirmed = window.confirm(`Delete list \"${title}\"? This action cannot be undone.`);
-    if (!confirmed) return;
-
-    try {
-      setDeletingListId(listId);
-      setDeleteError(null);
-      await deleteList(listId);
-      await fetchLists();
-    } catch (error) {
-      console.error("Failed to delete list:", error);
-      setDeleteError("Failed to delete list.");
-    } finally {
-      setDeletingListId(null);
-    }
-  };
-
   const handleCreateList = async () => {
     const trimmedTitle = createTitle.trim();
     const trimmedDescription = createDescription.trim();
@@ -135,13 +116,6 @@ export default function Dashboard() {
     } finally {
       setCreateLoading(false);
     }
-  };
-
-  const openEditDialog = (list: UserList) => {
-    setEditingList(list);
-    setEditTitle(list.title);
-    setEditDescription(list.description ?? "");
-    setUpdateError(null);
   };
 
   const handleCreateDialogChange = (open: boolean) => {
@@ -260,8 +234,6 @@ export default function Dashboard() {
         </header>
 
         <section className="space-y-8">
-          {deleteError ? <p className="text-sm text-red-600">{deleteError}</p> : null}
-
           {listsLoading ? (
             <Card>
               <CardContent className="py-8 text-center text-sm text-slate-500">Loading lists...</CardContent>
