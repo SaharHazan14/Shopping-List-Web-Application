@@ -538,6 +538,7 @@ export default function ListPage() {
       {showAddItemModal && parsedListId !== null ? (
         <AddItemToListModal
           listId={parsedListId}
+          existingItemIds={listItems.map((item) => item.itemId)}
           onItemAdded={() => {
             setShowAddItemModal(false);
             fetchItems();
