@@ -46,6 +46,7 @@ export function Select({
   return (
     <div ref={containerRef} className="relative">
       <button
+        type="button"
         id={id}
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}

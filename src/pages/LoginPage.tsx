@@ -18,10 +18,10 @@ export default function LoginPage() {
   }, [loginUrl]);
 
   return (
-    <div style={{ padding: "40px", textAlign: "center" }}>
-      <h1>Redirecting to login...</h1>
-      <p>
-        If you are not redirected automatically, <a href={loginUrl}>click here</a>.
+    <div className="flex min-h-screen flex-col items-center justify-center gap-2 px-4 text-center">
+      <p className="text-base font-medium text-slate-700">Redirecting to login...</p>
+      <p className="text-base font-medium text-slate-700">
+        If you are not redirected automatically, <a href={loginUrl} className="underline">click here</a>.
       </p>
     </div>
   );

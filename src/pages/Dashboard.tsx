@@ -214,7 +214,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
         <header className="mb-8">
-          <div className="flex items-start justify-between">
+          <div className="flex items-center justify-between gap-4">
             <div>
               <h1 className="inline-flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
                 <ShoppingCart className="h-7 w-7 text-emerald-600" />
@@ -225,8 +225,8 @@ export default function Dashboard() {
               </p>
             </div>
 
-            <div className="flex flex-col items-end gap-3">
-              {/* User Dropdown Menu - Top Right */}
+            <div className="flex items-center gap-3">
+              {/* User menu */}
               <div className="relative">
                 <button
                   onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
@@ -245,30 +245,15 @@ export default function Dashboard() {
                     <button
                       onClick={() => {
                         localStorage.removeItem("authToken");
-                        navigate("/login");
+                        navigate("/");
                       }}
-                      className="w-full px-3 py-2 text-left text-sm text-red-600 transition-colors hover:bg-red-50 active:bg-red-100 inline-flex items-center gap-2"
+                      className="inline-flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 transition-colors hover:bg-red-50 active:bg-red-100"
                     >
                       <LogOut className="h-4 w-4" />
                       Logout
                     </button>
                   </div>
                 )}
-              </div>
-
-              <div className="flex gap-3">
-                <Button
-                  onClick={() => navigate("/items")}
-                  className="bg-amber-500 font-semibold text-white hover:bg-amber-600"
-                >
-                  View Items Catalog
-                </Button>
-                <Button
-                  onClick={() => setIsCreateOpen(true)}
-                  className="bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
-                >
-                  Create New List
-                </Button>
               </div>
             </div>
           </div>
@@ -284,10 +269,24 @@ export default function Dashboard() {
           ) : (
             <>
               <div className="space-y-4">
-                <div className="flex items-start justify-between">
+                <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-xl font-semibold text-slate-900">My Lists</h2>
                     <p className="mt-1 text-sm text-slate-500">Lists you own and can fully manage.</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Button
+                      onClick={() => navigate("/items")}
+                      className="bg-amber-500 font-semibold text-white hover:bg-amber-600"
+                    >
+                      View Items Catalog
+                    </Button>
+                    <Button
+                      onClick={() => setIsCreateOpen(true)}
+                      className="bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
+                    >
+                      Create New List
+                    </Button>
                   </div>
                 </div>
                 <ItemList
