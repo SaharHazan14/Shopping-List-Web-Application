@@ -148,12 +148,15 @@ export default function ListPage() {
     const confirmed = window.confirm("Remove this item from the list?");
     if (!confirmed) return;
 
+    const previous = listItems;
+    setListItems((prev) => prev.filter((i) => i.itemId !== itemId));
+
     try {
       setItemActionLoadingId(itemId);
       await deleteListItem(parsedListId, itemId);
-      await fetchItems();
     } catch (err) {
       console.error("Failed to delete item:", err);
+      setListItems(previous);
       setItemsError("Failed to delete item.");
     } finally {
       setItemActionLoadingId(null);
@@ -166,12 +169,17 @@ export default function ListPage() {
     const nextQuantity = Math.max(1, item.quantity + delta);
     if (nextQuantity === item.quantity) return;
 
+    const previous = listItems;
+    setListItems((prev) =>
+      prev.map((i) => (i.itemId === item.itemId ? { ...i, quantity: nextQuantity } : i)),
+    );
+
     try {
       setItemActionLoadingId(item.itemId);
       await updateListItem(parsedListId, item.itemId, { quantity: nextQuantity });
-      await fetchItems();
     } catch (err) {
       console.error("Failed to update item quantity:", err);
+      setListItems(previous);
       setItemsError("Failed to update item quantity.");
     } finally {
       setItemActionLoadingId(null);
@@ -181,12 +189,17 @@ export default function ListPage() {
   const handleToggleChecked = async (item: ListItem) => {
     if (parsedListId === null || !canModifyItems) return;
 
+    const previous = listItems;
+    setListItems((prev) =>
+      prev.map((i) => (i.itemId === item.itemId ? { ...i, isChecked: !i.isChecked } : i)),
+    );
+
     try {
       setItemActionLoadingId(item.itemId);
       await updateListItem(parsedListId, item.itemId, { isChecked: !item.isChecked });
-      await fetchItems();
     } catch (err) {
       console.error("Failed to update item status:", err);
+      setListItems(previous);
       setItemsError("Failed to update item status.");
     } finally {
       setItemActionLoadingId(null);
@@ -403,53 +416,53 @@ export default function ListPage() {
 
         {!loading && !error && list ? (
           <div className="mt-5 space-y-6">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="space-y-3">
-                <div className="inline-flex items-center gap-2 text-slate-600">
-                  <User className="h-4 w-4" />
-                  <span className="text-sm text-slate-500">{creatorEmail}</span>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
+            {/* Header: title/meta on left, actions on right */}
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="space-y-1">
+                <h1 className="text-3xl font-bold tracking-tight text-slate-900">{list.title}</h1>
+                {list.description ? (
+                  <p className="text-sm text-slate-500">{list.description}</p>
+                ) : null}
+                <div className="flex flex-wrap items-center gap-3 pt-1">
+                  <span className="inline-flex items-center gap-1.5 text-sm text-slate-400">
+                    <User className="h-3.5 w-3.5" />
+                    {creatorEmail}
+                  </span>
                   <Button
                     type="button"
-                    variant="outline"
-                    className="gap-2 transition-all duration-200 hover:shadow-sm"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1.5 px-2 text-slate-500 hover:text-slate-700"
                     onClick={() => setShowCollaboratorsDialog(true)}
                   >
-                    <Users className="h-4 w-4" />
+                    <Users className="h-3.5 w-3.5" />
                     Collaborators
-                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                    <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-700">
                       {membersLoading ? "..." : listMembers.length}
                     </span>
                   </Button>
-
-                  {canManageList ? (
-                    <>
-                      <Button type="button" variant="outline" className="gap-2" onClick={openEditDialog}>
-                        <PencilLine className="h-4 w-4" />
-                        Edit List
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        className="gap-2"
-                        onClick={() => void handleDeleteList()}
-                        disabled={deleteListLoading}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        {deleteListLoading ? "Deleting..." : "Delete List"}
-                      </Button>
-                    </>
-                  ) : null}
                 </div>
+                {membersError ? <p className="text-sm text-red-600">{membersError}</p> : null}
               </div>
-            </div>
-            {membersError ? <p className="text-sm text-red-600">{membersError}</p> : null}
 
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight text-slate-900">{list.title}</h1>
-              <p className="mt-2 text-sm text-slate-500">{list.description || "No description"}</p>
+              {canManageList ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="button" variant="outline" className="gap-2" onClick={openEditDialog}>
+                    <PencilLine className="h-4 w-4" />
+                    Edit List
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    className="gap-2"
+                    onClick={() => void handleDeleteList()}
+                    disabled={deleteListLoading}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {deleteListLoading ? "Deleting..." : "Delete List"}
+                  </Button>
+                </div>
+              ) : null}
             </div>
 
             <Card className="rounded-xl border border-slate-200 shadow-sm">
