@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { Input } from "./ui/input";
-import { ChevronDown, Search } from "lucide-react";
+import { Search } from "lucide-react";
 
 interface AddItemToListModalProps {
   listId: number;
