@@ -1,7 +1,9 @@
 import axios from "axios";
 
+const configuredApiUrl = import.meta.env.VITE_API_URL as string | undefined;
+
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
+  baseURL: configuredApiUrl?.trim() || "/api",
 });
 
 api.interceptors.request.use((config) => {
@@ -21,7 +23,7 @@ api.interceptors.response.use(
       console.warn("Unauthorized - redirecting to login");
 
       localStorage.removeItem("accessToken");
-      window.location.href = "/login";
+      window.location.href = "/";
     }
 
     return Promise.reject(error);

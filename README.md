@@ -1,73 +1,93 @@
-# React + TypeScript + Vite
+# Shopping List Web App (Frontend)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + TypeScript + Vite frontend for the Shopping List application.
 
-Currently, two official plugins are available:
+## Prerequisites
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Node.js 20+
+- npm 10+
 
-## React Compiler
+## Environment variables
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Create a `.env` file from `.env.example` and fill values for your environment.
 
-## Expanding the ESLint configuration
+Required variables:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- `VITE_API_URL`: Backend base URL (example: `https://api.example.com`)
+- `VITE_COGNITO_DOMAIN`: Cognito hosted UI domain
+- `VITE_COGNITO_CLIENT_ID`: Cognito app client id
+- `VITE_COGNITO_REDIRECT_URI`: Must match deployed callback URL (example: `https://app.example.com/auth/callback`)
+- `VITE_COGNITO_SCOPE`: OAuth scopes (example: `email openid phone`)
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## Local development
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Production build
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm ci
+npm run build
+npm run preview
 ```
+
+Build output is generated in `dist/`.
+
+## Deploy (SPA routing requirement)
+
+This app uses client-side routing. Configure your host to rewrite all non-file routes to `index.html`.
+
+Examples:
+
+- Netlify `_redirects`: `/* /index.html 200`
+- Vercel rewrite: source `/(.*)` to destination `/index.html`
+- Nginx: `try_files $uri /index.html;`
+
+Without this rewrite, direct navigation to routes like `/dashboard` or `/auth/callback` will fail.
+
+## Deploy to Netlify
+
+This repository includes `netlify.toml` configured with:
+
+- Build command: `npm run build`
+- Publish directory: `dist`
+- SPA fallback redirect: `/* -> /index.html`
+
+### Netlify UI steps
+
+1. Push this repo to GitHub.
+2. In Netlify, click **Add new site** → **Import an existing project**.
+3. Select this repository and branch.
+4. Confirm settings:
+	- Build command: `npm run build`
+	- Publish directory: `dist`
+5. Add required environment variables in **Site settings** → **Environment variables**:
+	- `VITE_API_URL`
+	- `VITE_COGNITO_DOMAIN`
+	- `VITE_COGNITO_CLIENT_ID`
+	- `VITE_COGNITO_REDIRECT_URI`
+	- `VITE_COGNITO_SCOPE`
+6. Deploy the site.
+
+After first deploy, update Cognito callback/logout URLs to include your Netlify domain (for example `https://<your-site>.netlify.app/auth/callback`).
+
+### Netlify CLI (optional)
+
+```bash
+npm install -g netlify-cli
+netlify login
+netlify init
+netlify deploy --build
+netlify deploy --prod --build
+```
+
+## Production checklist
+
+- Set production values for all `VITE_*` variables.
+- Verify Cognito callback/logout URLs include production domain.
+- Verify backend CORS allows the frontend origin.
+- Deploy static files from `dist/`.
+- Smoke test login flow, callback, dashboard, and API-protected pages.
